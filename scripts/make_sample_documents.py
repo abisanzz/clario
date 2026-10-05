@@ -10,6 +10,8 @@ from fpdf import FPDF
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "sample_documents"
 SPECIMEN = "SPECIMEN - FICTITIOUS COMPANY - NOT A REAL DOCUMENT"
+# Checked on 5 Oct 2026: this number is not on the Companies House register
+NUMBER = "99999901"
 
 
 class SpecimenPDF(FPDF):
@@ -38,7 +40,7 @@ def certificate_of_incorporation(path: Path) -> None:
     pdf.ln(12)
 
     pdf.set_font("Times", "", 13)
-    pdf.cell(0, 10, "Company Number 12345678", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, f"Company Number {NUMBER}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(10)
 
     pdf.multi_cell(0, 8, "The Registrar of Companies for England and Wales, hereby certifies that", align="C")
@@ -63,7 +65,6 @@ def certificate_of_incorporation(path: Path) -> None:
 # --- Simple documents: a title, then headings, paragraphs and tables ---
 
 COMPANY = "EXAMPLE PAYMENTS LTD"
-NUMBER = "12345678"
 OFFICE = "1 Example Street, London EX1 1AA"
 
 

@@ -39,7 +39,7 @@ st.write(
 
 choice = st.radio("Document", ["Use the sample certificate", "Upload a PDF"], horizontal=True)
 if choice == "Use the sample certificate":
-    st.caption("A fictitious specimen for EXAMPLE PAYMENTS LTD. Its company number belongs to a real, dissolved company.")
+    st.caption("A fictitious specimen for EXAMPLE PAYMENTS LTD. Its company number is not on the Companies House register.")
     pdf_bytes, saved_answer = SAMPLE_PDF.read_bytes(), SAMPLE_ANSWER
 else:
     upload = st.file_uploader("Certificate of incorporation (PDF)", type=["pdf"])
