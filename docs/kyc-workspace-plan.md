@@ -1,0 +1,28 @@
+# KYC workspace plan
+
+Goal: the first page is a workspace where the user uploads **every document they have for a company**, adds **links**, and sees **which of the 32 checklist items are present and which are missing**, with evidence.
+
+## Decisions
+
+- **Documents are identified by Claude.** The user drops in files with any names. Claude labels each one (certificate of incorporation, proof of address, articles, shareholder register, ...). The user can correct a label before the checks run.
+- **All 32 checks are covered.** Claude maps the evidence for each check in one pass: status, a short finding, and quotes with document name and page.
+  - Checks with evidence type *Screening tool* (6.1–6.3) and *Internal decision* (3.3, 7.1–7.4, 8.1–8.3) are not decided from documents. They show as "Not started" with "needs screening tool" or "analyst decision". Claude may still point to related evidence.
+  - Our rule-based Section 1 checks (1.1–1.4) and live Companies House lookups run on top and take priority over Claude's view for those checks. Both are shown.
+- **Links:**
+  - *Companies House* (link or company number): company profile, officers and persons with significant control (PSC), from the free API. Used for 1.1, 1.3, 3.4, 4.1.
+  - *Company website*: page text fetched on this computer, used as supporting evidence for Section 5.
+  - *FCA register*: needs a free FCA API key (to be set up later). Used for Section 2.
+- **Statuses** are the checklist's own: Present, Missing, Unclear, Needs human review, Not started.
+- **Results page:** summary counts (like the spreadsheet's Summary tab), every check grouped by section with evidence, and a **"Request from client"** list built from the Missing checks and their evidence source (column D).
+- **Cost:** measured per company and shown on the page. Saved answers make sample demos free.
+- **Privacy:** only fictitious or approved documents; uploads are sent to Anthropic.
+
+## Order of work
+
+1. **Fake document pack** for EXAMPLE PAYMENTS LTD (certificate, proof of address, articles, shareholder register, ID verification report, onboarding/AML questionnaire, board resolution), with deliberate gaps (e.g. no ownership chart) and one inconsistency, so the demo shows Present, Missing and Unclear.
+2. **Links:** Companies House officers and PSC lookups; website text fetcher. Each becomes a text "document" that Claude can read.
+3. **Document identifier** (Claude), with tests using a fake Claude.
+4. **Evidence mapper** for all 32 checks (Claude) plus merging with the Section 1 rules, with tests.
+5. **New workspace page:** upload, links, identify and confirm, run, results and request list.
+6. **Real run** on the fake pack; measure cost; save answers for free demos.
+7. **FCA register** link, once an FCA API key is set up.
