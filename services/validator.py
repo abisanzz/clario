@@ -3,9 +3,11 @@
 import calendar
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
+from typing import Callable
 
+from services.companies_house import CompanyNotFound, LookupFailed, get_company
 from services.documents import (
     ArticlesOfAssociation,
     CertificateOfIncorporation,
@@ -227,3 +229,64 @@ def check_1_4(
         f"Articles provided. {authority[0].upper() + authority[1:]}. Analyst to confirm who can bind the company",
         source_reference,
     )
+
+
+def _format_companies_house_date(value) -> str:
+    """Companies House dates look like '2027-06-30'; show them as '30 Jun 2027'."""
+    try:
+        return _format_date(datetime.strptime(str(value), "%Y-%m-%d").date())
+    except ValueError:
+        return str(value) if value else "date not shown"
+
+
+def check_1_3(
+    certificate: CertificateOfIncorporation | None,
+    lookup: Callable[[str], dict] = get_company,
+    today: date | None = None,
+) -> CheckResult:
+    """Company status is active, with accounts and confirmation statement up to date."""
+    number = certificate.company_number.value if certificate else None
+    if _is_blank(number):
+        return CheckResult("1.3", Status.MISSING, "No company number to look up")
+
+    today = today or date.today()
+    number = re.sub(r"\s", "", str(number)).upper()
+    source_reference = f"Companies House API, checked {_format_date(today)}"
+
+    try:
+        record = lookup(number)
+    except CompanyNotFound:
+        return CheckResult(
+            "1.3", Status.UNCLEAR,
+            f"Company number {number} not found at Companies House; check for a typo", source_reference,
+        )
+    except LookupFailed as error:
+        return CheckResult(
+            "1.3", Status.NEEDS_HUMAN_REVIEW,
+            f"Companies House lookup failed ({error}); check manually", source_reference,
+        )
+
+    accounts = record.get("accounts") or {}
+    confirmation = record.get("confirmation_statement") or {}
+    accounts_due = _format_companies_house_date(accounts.get("next_due"))
+    confirmation_due = _format_companies_house_date(confirmation.get("next_due"))
+
+    red_flags = []
+    status = record.get("company_status") or "not shown"
+    if status != "active":
+        detail = record.get("company_status_detail")
+        red_flags.append(f"Companies House status: {status}" + (f" ({detail})" if detail else ""))
+    if accounts.get("overdue"):
+        red_flags.append(f"accounts overdue (were due {accounts_due})")
+    if confirmation.get("overdue"):
+        red_flags.append(f"confirmation statement overdue (was due {confirmation_due})")
+
+    if red_flags:
+        finding = "; ".join(red_flags)
+        return CheckResult("1.3", Status.NEEDS_HUMAN_REVIEW, finding[0].upper() + finding[1:], source_reference)
+
+    finding = (
+        f"Active at Companies House. Accounts next due {accounts_due}; "
+        f"confirmation statement next due {confirmation_due}"
+    )
+    return CheckResult("1.3", Status.PRESENT, finding, source_reference)

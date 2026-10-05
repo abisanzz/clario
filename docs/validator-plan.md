@@ -30,7 +30,7 @@ First version covers Section 1 (Legal existence) only.
 - Present: active and nothing overdue.
 - Missing: no company number to look up.
 - Unclear: company number not found at Companies House.
-- Needs human review: not active, filings overdue, or the lookup failed.
+- Needs human review: not active, filings overdue, or the lookup failed (no key, key rejected, no response). Confirmed: red flags never return Present.
 
 **1.4 Constitution and who can bind the company** (articles of association)
 - Missing: no articles provided.
@@ -44,11 +44,10 @@ First version covers Section 1 (Legal existence) only.
 2. Define the shape of a result. **Done**
 3. Build check 1.1, with tests. **Done**
 4. Build 1.2, then 1.4. **Done**
-5. Build 1.3 with the Companies House connection. **(Next step)**
+5. Build 1.3 with the Companies House connection. **Done** (`services/companies_house.py`; tested live against Tesco PLC)
 
 ## Open items
 
-- Confirm the 1.3 rules, especially sending red flags to "Needs human review".
 - Confirm the 3-month proof-of-address limit matches the firm's policy (`PROOF_OF_ADDRESS_MAX_AGE_MONTHS` in `services/validator.py`).
 - Later: cross-check 1.1 and 1.2 against the Companies House record.
 - Later: merge branch `add-kyc-checklist` into `main`.
