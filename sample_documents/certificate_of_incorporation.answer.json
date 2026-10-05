@@ -1,5 +1,5 @@
 {
-  "pdf_sha256": "f536fbaf21f072e91f17b13c47c703211ab77d8de6ad5f25ccca33479f4383af",
+  "input_sha256": "f536fbaf21f072e91f17b13c47c703211ab77d8de6ad5f25ccca33479f4383af",
   "model": "claude-opus-5-5",
   "answer": {
     "company_name": {

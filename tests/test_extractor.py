@@ -2,13 +2,13 @@ import base64
 import json
 from datetime import date
 from pathlib import Path
-from types import SimpleNamespace
 
 import anthropic
 import httpx2
 import pytest
 
 from services.documents import Fact
+from tests.fakes import FakeClaude
 from services.extractor import ExtractionFailed, extract_certificate, read_certificate
 
 SAMPLE = Path(__file__).resolve().parent.parent / "sample_documents" / "certificate_of_incorporation.pdf"
@@ -24,26 +24,6 @@ def answer(**changes):
         "legal_form": {"value": "private company limited by shares", "page": 1},
     }
     return {**good, **changes}
-
-
-class FakeClaude:
-    """Stands in for the Anthropic client: returns a saved reply, or raises an error, and records the request."""
-
-    def __init__(self, reply=None, error=None, stop_reason="end_turn"):
-        self.reply, self.error, self.stop_reason = reply, error, stop_reason
-        self.requests = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
-
-    def _create(self, **request):
-        self.requests.append(request)
-        if self.error:
-            raise self.error
-        text = self.reply if isinstance(self.reply, str) else json.dumps(self.reply)
-        return SimpleNamespace(
-            stop_reason=self.stop_reason,
-            content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=text)],
-            usage=SimpleNamespace(input_tokens=3000, output_tokens=300),
-        )
 
 
 def http_error(error_class, status):

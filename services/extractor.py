@@ -73,28 +73,35 @@ class Extraction:
 
     @property
     def cost_usd(self) -> float:
-        input_price, output_price = PRICE_PER_MILLION_TOKENS
-        return (self.input_tokens * input_price + self.output_tokens * output_price) / 1_000_000
+        return cost_usd(self.input_tokens, self.output_tokens)
 
 
-def _ask_claude(client, pdf_bytes: bytes, request: str, schema: dict) -> tuple[dict, object]:
-    """Return Claude's answer as a dict, plus the token usage reported by the API."""
-    pdf = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+def cost_usd(input_tokens: int, output_tokens: int) -> float:
+    input_price, output_price = PRICE_PER_MILLION_TOKENS
+    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+
+
+IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+def file_block(data: bytes, media_type: str = "application/pdf") -> dict:
+    """Package a PDF or image so it can be sent to Claude."""
+    encoded = base64.standard_b64encode(data).decode("utf-8")
+    kind = "image" if media_type in IMAGE_TYPES else "document"
+    return {"type": kind, "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+
+
+def ask_claude(client, content: list, schema: dict, system: str = SYSTEM_PROMPT, effort: str = EFFORT):
+    """Send files and a request to Claude; return its answer as a dict, plus the token usage."""
     try:
         response = client.beta.messages.create(
             model=MODEL,
             max_tokens=16000,
             betas=[FALLBACK_BETA],
             fallbacks="default",
-            system=SYSTEM_PROMPT,
-            output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": schema}},
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf}},
-                    {"type": "text", "text": request},
-                ],
-            }],
+            system=system,
+            output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": content}],
         )
     except anthropic.AuthenticationError as error:
         raise ExtractionFailed("Anthropic API key is missing or was rejected") from error
@@ -133,7 +140,30 @@ def _date_fact(raw: dict, document: str) -> Fact:
         return fact  # keep the printed text so the validator can report it as unreadable
 
 
-def _client():
+def saved_or_ask(saved_answer: Path | None, fingerprint: str, ask) -> tuple[dict, object, bool]:
+    """Replay a saved answer for the same input (free), or call ask() and save its answer.
+
+    Returns (answer, usage, replayed). ask() returns (answer, usage) and may raise before anything is saved.
+    """
+    if saved_answer and saved_answer.exists():
+        saved = json.loads(saved_answer.read_text())
+        if saved.get("input_sha256") == fingerprint:
+            return saved["answer"], None, True
+    answer, usage = ask()
+    return answer, usage, False
+
+
+def save_answer(saved_answer: Path | None, fingerprint: str, answer: dict) -> None:
+    if saved_answer:
+        saved_answer.write_text(json.dumps({"input_sha256": fingerprint, "model": MODEL, "answer": answer}, indent=2))
+
+
+def tokens(usage) -> tuple[int, int]:
+    return (getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0)
+
+
+def make_client():
+    """An Anthropic client using the key in .env."""
     load_dotenv(ENV_PATH)
     try:
         return anthropic.Anthropic()
@@ -165,20 +195,16 @@ def read_certificate(pdf_bytes: bytes, saved_answer: Path | None = None, client=
     time the same PDF is read. A different PDF always gets a fresh answer.
     """
     fingerprint = hashlib.sha256(pdf_bytes).hexdigest()
-    if saved_answer and saved_answer.exists():
-        saved = json.loads(saved_answer.read_text())
-        if saved.get("pdf_sha256") == fingerprint:
-            return Extraction(_certificate_from_answer(saved["answer"]), replayed=True)
-
-    raw, usage = _ask_claude(client or _client(), pdf_bytes, CERTIFICATE_REQUEST, CERTIFICATE_SCHEMA)
+    raw, usage, replayed = saved_or_ask(saved_answer, fingerprint, lambda: ask_claude(
+        client or make_client(),
+        [file_block(pdf_bytes), {"type": "text", "text": CERTIFICATE_REQUEST}],
+        CERTIFICATE_SCHEMA,
+    ))
     certificate = _certificate_from_answer(raw)  # check the answer is usable before saving it
-    if saved_answer:
-        saved_answer.write_text(json.dumps({"pdf_sha256": fingerprint, "model": MODEL, "answer": raw}, indent=2))
-    return Extraction(
-        certificate,
-        input_tokens=getattr(usage, "input_tokens", 0) or 0,
-        output_tokens=getattr(usage, "output_tokens", 0) or 0,
-    )
+    if not replayed:
+        save_answer(saved_answer, fingerprint, raw)
+    input_tokens, output_tokens = tokens(usage)
+    return Extraction(certificate, input_tokens, output_tokens, replayed)
 
 
 def extract_certificate(pdf_path: Path, client=None) -> CertificateOfIncorporation:
