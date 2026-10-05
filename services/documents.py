@@ -12,7 +12,7 @@ class Fact:
     understood is kept as the original text so the validator can report it.
     """
 
-    value: str | date | None = None
+    value: str | date | bool | None = None
     source: str = ""
 
 
@@ -22,3 +22,17 @@ class CertificateOfIncorporation:
     company_number: Fact = field(default_factory=Fact)
     incorporation_date: Fact = field(default_factory=Fact)
     legal_form: Fact = field(default_factory=Fact)
+
+
+@dataclass(frozen=True)
+class ProofOfAddress:
+    company_name: Fact = field(default_factory=Fact)
+    registered_office: Fact = field(default_factory=Fact)
+    document_date: Fact = field(default_factory=Fact)
+
+
+@dataclass(frozen=True)
+class OnboardingQuestionnaire:
+    # True = trades from the registered office, False = trades elsewhere, None = not answered
+    trades_from_registered_office: Fact = field(default_factory=Fact)
+    principal_place_of_business: Fact = field(default_factory=Fact)

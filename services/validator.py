@@ -1,14 +1,18 @@
 """Decide a status for each KYC checklist item."""
 
+import calendar
 import re
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 
-from services.documents import CertificateOfIncorporation
+from services.documents import CertificateOfIncorporation, OnboardingQuestionnaire, ProofOfAddress
 
 # UK company numbers are 8 characters: 8 digits, or 2 letters then 6 digits (e.g. SC123456)
 COMPANY_NUMBER_PATTERN = re.compile(r"^(\d{8}|[A-Z]{2}\d{6})$")
+
+# Proof of address older than this is treated as out of date. Common KYC practice, not set by the checklist.
+PROOF_OF_ADDRESS_MAX_AGE_MONTHS = 3
 
 
 class Status(Enum):
@@ -89,3 +93,95 @@ def check_1_1(certificate: CertificateOfIncorporation | None, today: date | None
         f"incorporated {_format_date(incorporated)}, legal form '{certificate.legal_form.value}'"
     )
     return CheckResult("1.1", Status.PRESENT, finding, source_reference)
+
+
+def _is_blank(value) -> bool:
+    return value is None or str(value).strip() == ""
+
+
+def _months_before(day: date, months: int) -> date:
+    year, month = divmod(day.year * 12 + day.month - 1 - months, 12)
+    month += 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+def _normalise_company_name(name: str) -> str:
+    name = re.sub(r"[^\w\s]", " ", name.upper().replace("&", " AND "))
+    name = " ".join(name.split())
+    name = re.sub(r"\bPUBLIC LIMITED COMPANY\b", "PLC", name)
+    return re.sub(r"\bLIMITED\b", "LTD", name)
+
+
+def _same_company_name(a: str, b: str) -> bool:
+    """True if two names differ only in capitals, punctuation, spacing, or LIMITED/LTD and PLC wording."""
+    return _normalise_company_name(a) == _normalise_company_name(b)
+
+
+def check_1_2(
+    proof: ProofOfAddress | None,
+    questionnaire: OnboardingQuestionnaire | None,
+    certificate: CertificateOfIncorporation | None = None,
+    today: date | None = None,
+) -> CheckResult:
+    """Registered office and principal place of business, if different."""
+    if proof is None:
+        return CheckResult("1.2", Status.MISSING, "No proof of registered address provided")
+
+    today = today or date.today()
+    questionnaire = questionnaire or OnboardingQuestionnaire()
+    missing = []
+    unclear = []
+
+    if _is_blank(proof.registered_office.value):
+        missing.append("Registered office address not found on proof of address")
+
+    document_date = proof.document_date.value
+    if _is_blank(document_date):
+        unclear.append("proof of address has no date, so its age cannot be confirmed")
+    elif not isinstance(document_date, date):
+        unclear.append(f"proof of address date '{document_date}' could not be read as a date")
+    elif document_date > today:
+        unclear.append(f"proof of address is dated in the future ({_format_date(document_date)})")
+    elif document_date < _months_before(today, PROOF_OF_ADDRESS_MAX_AGE_MONTHS):
+        unclear.append(
+            f"proof of address is dated {_format_date(document_date)}, "
+            f"more than {PROOF_OF_ADDRESS_MAX_AGE_MONTHS} months ago"
+        )
+
+    proof_name = proof.company_name.value
+    certificate_name = certificate.company_name.value if certificate else None
+    if _is_blank(proof_name):
+        unclear.append("company name not found on proof of address, so it cannot be matched to the client")
+    elif not _is_blank(certificate_name) and not _same_company_name(str(proof_name), str(certificate_name)):
+        unclear.append(f"proof of address is for '{proof_name}', certificate says '{certificate_name}'")
+
+    trades_from_registered_office = questionnaire.trades_from_registered_office.value
+    principal = questionnaire.principal_place_of_business.value
+    if trades_from_registered_office is True:
+        principal_text = "same as registered office"
+    elif trades_from_registered_office is False and not _is_blank(principal):
+        principal_text = str(principal)
+    elif trades_from_registered_office is False:
+        principal_text = None
+        unclear.append("client operates away from the registered office but gave no principal place of business")
+    else:
+        principal_text = None
+        unclear.append("not stated whether the principal place of business differs from the registered office")
+
+    facts = [
+        proof.company_name, proof.registered_office, proof.document_date,
+        questionnaire.trades_from_registered_office, questionnaire.principal_place_of_business,
+    ]
+    source_reference = "; ".join(sorted({fact.source for fact in facts if fact.source}))
+
+    if missing:
+        finding = "; ".join(missing)
+        if unclear:
+            finding += ". Also: " + "; ".join(unclear)
+        return CheckResult("1.2", Status.MISSING, finding, source_reference)
+    if unclear:
+        finding = "; ".join(unclear)
+        return CheckResult("1.2", Status.UNCLEAR, finding[0].upper() + finding[1:], source_reference)
+
+    finding = f"Registered office: {proof.registered_office.value}. Principal place of business: {principal_text}"
+    return CheckResult("1.2", Status.PRESENT, finding, source_reference)
