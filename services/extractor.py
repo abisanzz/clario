@@ -4,7 +4,9 @@ The extractor only reports what is printed. Deciding whether a fact is valid is 
 """
 
 import base64
+import hashlib
 import json
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +19,8 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 MODEL = "claude-opus-5-5"
 EFFORT = "medium"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# US dollars per million tokens for MODEL (input, output); used to show the cost of each run
+PRICE_PER_MILLION_TOKENS = (4.00, 20.00)
 
 SYSTEM_PROMPT = """You read company documents for a KYC (know your customer) review and report facts exactly as printed.
 
@@ -58,8 +62,24 @@ class ExtractionFailed(Exception):
     """The document could not be read; the message says why (never includes the key)."""
 
 
-def _ask_claude(client, pdf_path: Path, request: str, schema: dict) -> dict:
-    pdf = base64.standard_b64encode(Path(pdf_path).read_bytes()).decode("utf-8")
+@dataclass(frozen=True)
+class Extraction:
+    """A certificate's facts plus what reading it cost."""
+
+    certificate: CertificateOfIncorporation
+    input_tokens: int = 0
+    output_tokens: int = 0
+    replayed: bool = False  # True when a saved answer was used instead of calling Claude
+
+    @property
+    def cost_usd(self) -> float:
+        input_price, output_price = PRICE_PER_MILLION_TOKENS
+        return (self.input_tokens * input_price + self.output_tokens * output_price) / 1_000_000
+
+
+def _ask_claude(client, pdf_bytes: bytes, request: str, schema: dict) -> tuple[dict, object]:
+    """Return Claude's answer as a dict, plus the token usage reported by the API."""
+    pdf = base64.standard_b64encode(pdf_bytes).decode("utf-8")
     try:
         response = client.beta.messages.create(
             model=MODEL,
@@ -94,7 +114,7 @@ def _ask_claude(client, pdf_path: Path, request: str, schema: dict) -> dict:
 
     text = next((block.text for block in response.content if block.type == "text"), None)
     try:
-        return json.loads(text)
+        return json.loads(text), getattr(response, "usage", None)
     except (TypeError, json.JSONDecodeError) as error:
         raise ExtractionFailed("Claude's answer could not be read") from error
 
@@ -121,16 +141,14 @@ def _client():
         raise ExtractionFailed("Anthropic API key is missing or was rejected") from error
 
 
-def extract_certificate(pdf_path: Path, client=None) -> CertificateOfIncorporation:
-    """Read a certificate of incorporation PDF and return its four facts."""
-    raw = _ask_claude(
-        client or _client(),
-        pdf_path,
-        "This should be a UK certificate of incorporation. Report the registered company name, "
-        "company number, incorporation date and legal form (the type of company, e.g. "
-        "'private company limited by shares').",
-        CERTIFICATE_SCHEMA,
-    )
+CERTIFICATE_REQUEST = (
+    "This should be a UK certificate of incorporation. Report the registered company name, "
+    "company number, incorporation date and legal form (the type of company, e.g. "
+    "'private company limited by shares')."
+)
+
+
+def _certificate_from_answer(raw: dict) -> CertificateOfIncorporation:
     document = "Certificate of incorporation"
     return CertificateOfIncorporation(
         company_name=_fact(raw["company_name"], document),
@@ -138,3 +156,31 @@ def extract_certificate(pdf_path: Path, client=None) -> CertificateOfIncorporati
         incorporation_date=_date_fact(raw["incorporation_date"], document),
         legal_form=_fact(raw["legal_form"], document),
     )
+
+
+def read_certificate(pdf_bytes: bytes, saved_answer: Path | None = None, client=None) -> Extraction:
+    """Read a certificate of incorporation and report what it cost.
+
+    If saved_answer is given, Claude's answer is stored there and replayed (free) the next
+    time the same PDF is read. A different PDF always gets a fresh answer.
+    """
+    fingerprint = hashlib.sha256(pdf_bytes).hexdigest()
+    if saved_answer and saved_answer.exists():
+        saved = json.loads(saved_answer.read_text())
+        if saved.get("pdf_sha256") == fingerprint:
+            return Extraction(_certificate_from_answer(saved["answer"]), replayed=True)
+
+    raw, usage = _ask_claude(client or _client(), pdf_bytes, CERTIFICATE_REQUEST, CERTIFICATE_SCHEMA)
+    certificate = _certificate_from_answer(raw)  # check the answer is usable before saving it
+    if saved_answer:
+        saved_answer.write_text(json.dumps({"pdf_sha256": fingerprint, "model": MODEL, "answer": raw}, indent=2))
+    return Extraction(
+        certificate,
+        input_tokens=getattr(usage, "input_tokens", 0) or 0,
+        output_tokens=getattr(usage, "output_tokens", 0) or 0,
+    )
+
+
+def extract_certificate(pdf_path: Path, client=None) -> CertificateOfIncorporation:
+    """Read a certificate of incorporation PDF and return its four facts."""
+    return read_certificate(Path(pdf_path).read_bytes(), client=client).certificate

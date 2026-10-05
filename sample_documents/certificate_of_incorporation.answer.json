@@ -1,0 +1,23 @@
+{
+  "pdf_sha256": "c4fd9764b82eb2c527d7bfc66d2330faade6b5806149d0bb0a701bcfdc2ba4b0",
+  "model": "claude-opus-5-5",
+  "answer": {
+    "company_name": {
+      "value": "EXAMPLE PAYMENTS LTD",
+      "page": 1
+    },
+    "company_number": {
+      "value": "12345678",
+      "page": 1
+    },
+    "incorporation_date": {
+      "value": "14th March 2019",
+      "iso_date": "2019-03-14",
+      "page": 1
+    },
+    "legal_form": {
+      "value": "PRIVATE LIMITED COMPANY",
+      "page": 1
+    }
+  }
+}

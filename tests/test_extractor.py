@@ -9,7 +9,7 @@ import httpx2
 import pytest
 
 from services.documents import Fact
-from services.extractor import ExtractionFailed, extract_certificate
+from services.extractor import ExtractionFailed, extract_certificate, read_certificate
 
 SAMPLE = Path(__file__).resolve().parent.parent / "sample_documents" / "certificate_of_incorporation.pdf"
 SOURCE = "Certificate of incorporation p.1"
@@ -42,6 +42,7 @@ class FakeClaude:
         return SimpleNamespace(
             stop_reason=self.stop_reason,
             content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=text)],
+            usage=SimpleNamespace(input_tokens=3000, output_tokens=300),
         )
 
 
@@ -144,3 +145,43 @@ def test_cut_off_answer_is_reported():
 def test_garbled_answer_is_reported():
     with pytest.raises(ExtractionFailed, match="could not be read"):
         extract_certificate(SAMPLE, client=FakeClaude("not json"))
+
+
+# --- Saving and replaying answers, and cost ---
+
+def test_cost_is_reported():
+    extraction = read_certificate(SAMPLE.read_bytes(), client=FakeClaude(answer()))
+    assert (extraction.input_tokens, extraction.output_tokens) == (3000, 300)
+    assert extraction.cost_usd == pytest.approx(3000 * 4 / 1e6 + 300 * 20 / 1e6)  # $0.018
+    assert extraction.replayed is False
+
+
+def test_saved_answer_is_replayed_without_calling_claude(tmp_path):
+    saved = tmp_path / "answer.json"
+    first = read_certificate(SAMPLE.read_bytes(), saved_answer=saved, client=FakeClaude(answer()))
+    assert saved.exists()
+
+    claude = FakeClaude(error=AssertionError("Claude should not be called"))
+    second = read_certificate(SAMPLE.read_bytes(), saved_answer=saved, client=claude)
+    assert claude.requests == []
+    assert second.replayed is True
+    assert second.cost_usd == 0
+    assert second.certificate == first.certificate
+
+
+def test_different_pdf_gets_a_fresh_answer(tmp_path):
+    saved = tmp_path / "answer.json"
+    read_certificate(SAMPLE.read_bytes(), saved_answer=saved, client=FakeClaude(answer()))
+
+    claude = FakeClaude(answer(company_name={"value": "OTHER CO LTD", "page": 1}))
+    result = read_certificate(b"%PDF a different file", saved_answer=saved, client=claude)
+    assert len(claude.requests) == 1
+    assert result.replayed is False
+    assert result.certificate.company_name.value == "OTHER CO LTD"
+
+
+def test_failed_read_saves_nothing(tmp_path):
+    saved = tmp_path / "answer.json"
+    with pytest.raises(ExtractionFailed):
+        read_certificate(SAMPLE.read_bytes(), saved_answer=saved, client=FakeClaude("not json"))
+    assert not saved.exists()
