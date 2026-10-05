@@ -80,3 +80,73 @@ def test_key_never_appears_in_error_messages(key, monkeypatch, error):
     with pytest.raises(LookupFailed) as caught:
         get_company("12345678")
     assert FAKE_KEY not in str(caught.value)
+
+
+# --- Links, officers, PSC and the summary ---
+
+from services.companies_house import companies_house_summary, parse_company_number  # noqa: E402
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("12345678", "12345678"),
+    (" sc 123456 ", "SC123456"),
+    ("https://find-and-update.company-information.service.gov.uk/company/00445790", "00445790"),
+    ("https://find-and-update.company-information.service.gov.uk/company/00445790/officers", "00445790"),
+    ("find-and-update.company-information.service.gov.uk/company/sc123456?x=1", "SC123456"),
+    ("not a number", None),
+    ("1234567", None),
+    ("", None),
+])
+def test_parse_company_number(text, expected):
+    assert parse_company_number(text) == expected
+
+
+def fake_register(monkeypatch, replies):
+    """Replace the web call: return a reply chosen by which address was asked for."""
+    asked = []
+
+    def urlopen(request, timeout):
+        asked.append(request.full_url)
+        for fragment, reply in replies.items():
+            if fragment in request.full_url:
+                if isinstance(reply, Exception):
+                    raise reply
+                return io.BytesIO(reply)
+        raise AssertionError(f"unexpected address {request.full_url}")
+
+    monkeypatch.setattr(companies_house.urllib.request, "urlopen", urlopen)
+    return asked
+
+
+PROFILE = (b'{"company_name": "EXAMPLE PAYMENTS LTD", "company_status": "active", "type": "ltd",'
+           b' "date_of_creation": "2019-03-14", "registered_office_address": {"address_line_1": "1 Example Street",'
+           b' "locality": "London", "postal_code": "EX1 1AA"}, "accounts": {"next_due": "2027-06-30", "overdue": false},'
+           b' "confirmation_statement": {"next_due": "2027-03-14", "overdue": false}}')
+OFFICERS = (b'{"items": [{"name": "SAMPLE, Alex", "officer_role": "director", "appointed_on": "2019-03-14"},'
+            b' {"name": "OLD, Pat", "officer_role": "director", "appointed_on": "2019-03-14", "resigned_on": "2020-01-01"}]}')
+PSC = (b'{"items": [{"name": "Alex Sample", "notified_on": "2019-03-14",'
+       b' "natures_of_control": ["ownership-of-shares-50-to-75-percent", "voting-rights-50-to-75-percent"]}]}')
+
+
+def test_summary_lists_profile_officers_and_psc(key, monkeypatch):
+    asked = fake_register(monkeypatch, {"/officers": OFFICERS, "/persons-with": PSC, "/company/12345678": PROFILE})
+    summary = companies_house_summary("12345678")
+    assert "Company name: EXAMPLE PAYMENTS LTD" in summary
+    assert "Registered office: 1 Example Street, London, EX1 1AA" in summary
+    assert "- SAMPLE, Alex - director, appointed 2019-03-14" in summary
+    assert "- OLD, Pat - director, appointed 2019-03-14, resigned 2020-01-01" in summary
+    assert "- Alex Sample - ownership of shares 50 to 75 percent; voting rights 50 to 75 percent" in summary
+    assert len(asked) == 3
+
+
+def test_summary_handles_missing_officer_and_psc_lists(key, monkeypatch):
+    fake_register(monkeypatch, {"/officers": http_error(404), "/persons-with": http_error(404),
+                                "/company/12345678": PROFILE})
+    summary = companies_house_summary("12345678")
+    assert summary.count("- none listed") == 2
+
+
+def test_summary_for_unknown_company_raises(key, monkeypatch):
+    fake_register(monkeypatch, {"/company/12345678": http_error(404)})
+    with pytest.raises(CompanyNotFound):
+        companies_house_summary("12345678")
