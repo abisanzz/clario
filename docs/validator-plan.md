@@ -34,15 +34,17 @@ First version covers Section 1 (Legal existence) only.
 
 **1.4 Constitution and who can bind the company** (articles of association)
 - Missing: no articles provided.
-- Needs human review: articles provided (interpreting authority is a judgement call).
+- Unclear: company name missing from the articles or different from the certificate.
+- Needs human review: articles provided (interpreting authority is a judgement call). The finding includes the extractor's summary of who can sign, with its page, or says none was found.
+- Never Present.
 
 ## Order of work
 
 1. Load the 32 checks from the spreadsheet. **Done**
 2. Define the shape of a result. **Done**
 3. Build check 1.1, with tests. **Done**
-4. Build 1.2 (**done**), then 1.4. **(Next step)**
-5. Build 1.3 with the Companies House connection.
+4. Build 1.2, then 1.4. **Done**
+5. Build 1.3 with the Companies House connection. **(Next step)**
 
 ## Open items
 

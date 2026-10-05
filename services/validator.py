@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 
-from services.documents import CertificateOfIncorporation, OnboardingQuestionnaire, ProofOfAddress
+from services.documents import (
+    ArticlesOfAssociation,
+    CertificateOfIncorporation,
+    OnboardingQuestionnaire,
+    ProofOfAddress,
+)
 
 # UK company numbers are 8 characters: 8 digits, or 2 letters then 6 digits (e.g. SC123456)
 COMPANY_NUMBER_PATTERN = re.compile(r"^(\d{8}|[A-Z]{2}\d{6})$")
@@ -185,3 +190,40 @@ def check_1_2(
 
     finding = f"Registered office: {proof.registered_office.value}. Principal place of business: {principal_text}"
     return CheckResult("1.2", Status.PRESENT, finding, source_reference)
+
+
+def check_1_4(
+    articles: ArticlesOfAssociation | None,
+    certificate: CertificateOfIncorporation | None = None,
+) -> CheckResult:
+    """Constitution and who has power to bind the company. Never Present: authority is a judgement call."""
+    if articles is None:
+        return CheckResult("1.4", Status.MISSING, "No articles of association provided")
+
+    summary = articles.authority_summary
+    if _is_blank(summary.value):
+        authority = "no description of signing authority was found; analyst to read the articles"
+    else:
+        where = f" ({summary.source})" if summary.source else ""
+        authority = f"authority{where}: {summary.value}"
+
+    articles_name = articles.company_name.value
+    certificate_name = certificate.company_name.value if certificate else None
+    problem = None
+    if _is_blank(articles_name):
+        problem = "Company name not found on articles, so they cannot be matched to the client"
+    elif not _is_blank(certificate_name) and not _same_company_name(str(articles_name), str(certificate_name)):
+        problem = f"Articles are for '{articles_name}', certificate says '{certificate_name}'"
+
+    source_reference = "; ".join(sorted({f.source for f in (articles.company_name, summary) if f.source}))
+
+    if problem:
+        return CheckResult("1.4", Status.UNCLEAR, f"{problem}. Also: {authority}", source_reference)
+    if _is_blank(summary.value):
+        return CheckResult("1.4", Status.NEEDS_HUMAN_REVIEW, f"Articles provided but {authority}", source_reference)
+    return CheckResult(
+        "1.4",
+        Status.NEEDS_HUMAN_REVIEW,
+        f"Articles provided. {authority[0].upper() + authority[1:]}. Analyst to confirm who can bind the company",
+        source_reference,
+    )

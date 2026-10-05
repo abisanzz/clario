@@ -36,3 +36,10 @@ class OnboardingQuestionnaire:
     # True = trades from the registered office, False = trades elsewhere, None = not answered
     trades_from_registered_office: Fact = field(default_factory=Fact)
     principal_place_of_business: Fact = field(default_factory=Fact)
+
+
+@dataclass(frozen=True)
+class ArticlesOfAssociation:
+    company_name: Fact = field(default_factory=Fact)
+    # Short summary of who can act and sign for the company, written by the extractor
+    authority_summary: Fact = field(default_factory=Fact)
