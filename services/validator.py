@@ -281,12 +281,37 @@ def check_1_3(
     if confirmation.get("overdue"):
         red_flags.append(f"confirmation statement overdue (was due {confirmation_due})")
 
-    if red_flags:
-        finding = "; ".join(red_flags)
-        return CheckResult("1.3", Status.NEEDS_HUMAN_REVIEW, finding[0].upper() + finding[1:], source_reference)
+    # Does the register agree with the certificate?
+    mismatches = []
+    compared = []
+    certificate_name = certificate.company_name.value
+    register_name = record.get("company_name")
+    if not _is_blank(certificate_name) and not _is_blank(register_name):
+        compared.append("name")
+        if not _same_company_name(str(certificate_name), str(register_name)):
+            mismatches.append(
+                f"name on certificate '{certificate_name}' does not match Companies House '{register_name}'"
+            )
+    certificate_date = certificate.incorporation_date.value
+    register_date = record.get("date_of_creation")
+    if isinstance(certificate_date, date) and register_date:
+        compared.append("incorporation date")
+        if _format_companies_house_date(register_date) != _format_date(certificate_date):
+            mismatches.append(
+                f"incorporation date on certificate {_format_date(certificate_date)} does not match "
+                f"Companies House {_format_companies_house_date(register_date)}"
+            )
+
+    if red_flags or mismatches:
+        finding = "; ".join(red_flags + mismatches)
+        status = Status.NEEDS_HUMAN_REVIEW if red_flags else Status.UNCLEAR
+        return CheckResult("1.3", status, finding[0].upper() + finding[1:], source_reference)
 
     finding = (
         f"Active at Companies House. Accounts next due {accounts_due}; "
         f"confirmation statement next due {confirmation_due}"
     )
+    if compared:
+        verb = "match" if len(compared) > 1 else "matches"
+        finding += f". {' and '.join(compared).capitalize()} {verb} the certificate"
     return CheckResult("1.3", Status.PRESENT, finding, source_reference)

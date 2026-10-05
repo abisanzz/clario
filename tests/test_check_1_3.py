@@ -148,3 +148,68 @@ def test_failed_lookup_needs_human_review(reason):
 ])
 def test_red_flags_and_failures_are_never_present(lookup):
     assert run(certificate(), lookup).status is not Status.PRESENT
+
+
+# --- Comparing the register with the certificate ---
+
+def full_certificate(name="EXAMPLE PAYMENTS LTD", incorporated=date(2019, 3, 14)):
+    page = "Certificate of incorporation p.1"
+    return CertificateOfIncorporation(
+        company_name=Fact(name, page),
+        company_number=Fact("12345678", page),
+        incorporation_date=Fact(incorporated, page),
+    )
+
+
+def register(**changes):
+    return record(**{"company_name": "EXAMPLE PAYMENTS LIMITED", "date_of_creation": "2019-03-14", **changes})
+
+
+def test_matching_name_and_date_is_present_and_says_so():
+    result = run(full_certificate(), returns(register()))
+    assert result.status is Status.PRESENT
+    assert result.finding.endswith("Name and incorporation date match the certificate")
+
+
+def test_only_name_compared_when_register_has_no_date():
+    reply = register()
+    del reply["date_of_creation"]
+    assert run(full_certificate(), returns(reply)).finding.endswith("Name matches the certificate")
+
+
+def test_different_name_is_unclear():
+    result = run(full_certificate(), returns(register(company_name="BOCIOC M LIMITED")))
+    assert result.status is Status.UNCLEAR
+    assert result.finding == (
+        "Name on certificate 'EXAMPLE PAYMENTS LTD' does not match Companies House 'BOCIOC M LIMITED'"
+    )
+
+
+def test_different_incorporation_date_is_unclear():
+    result = run(full_certificate(), returns(register(date_of_creation="2020-01-02")))
+    assert result.status is Status.UNCLEAR
+    assert result.finding == (
+        "Incorporation date on certificate 14 Mar 2019 does not match Companies House 2 Jan 2020"
+    )
+
+
+def test_red_flag_and_mismatch_are_both_listed_and_need_human_review():
+    reply = register(status="dissolved", company_name="BOCIOC M LIMITED")
+    result = run(full_certificate(), returns(reply))
+    assert result.status is Status.NEEDS_HUMAN_REVIEW
+    assert result.finding == (
+        "Companies House status: dissolved; "
+        "name on certificate 'EXAMPLE PAYMENTS LTD' does not match Companies House 'BOCIOC M LIMITED'"
+    )
+
+
+def test_nothing_compared_when_certificate_lacks_name_and_date():
+    result = run(certificate(), returns(register(company_name="SOMEONE ELSE LTD")))
+    assert result.status is Status.PRESENT
+    assert "certificate" not in result.finding
+
+
+def test_unreadable_certificate_date_is_not_compared():
+    result = run(full_certificate(incorporated="14th of Marhc"), returns(register(date_of_creation="2020-01-02")))
+    assert result.status is Status.PRESENT
+    assert result.finding.endswith("Name matches the certificate")
