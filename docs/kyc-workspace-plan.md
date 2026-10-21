@@ -13,7 +13,7 @@ Goal: the first page is a workspace where the user uploads **every document they
   - *Company website*: page text fetched on this computer, used as supporting evidence for Section 5.
   - *FCA register*: needs a free FCA API key (to be set up later). Used for Section 2.
 - **Statuses** are the checklist's own: Present, Missing, Unclear, Needs human review, Not started.
-- **Results page:** summary counts (like the spreadsheet's Summary tab), every check grouped by section with evidence, and a **"Request from client"** list built from the Missing checks and their evidence source (column D).
+- **Results page:** summary counts (like the spreadsheet's Summary tab), every check grouped by section with evidence, and two lists built from Missing or Unclear checks: **"Request from client"** (client documents and questionnaire) and **"Check on public registers"** (Companies House, FCA), each with its evidence source (column D).
 - **Cost:** measured per company and shown on the page. Saved answers make sample demos free.
 - **Privacy:** only fictitious or approved documents; uploads are sent to Anthropic.
 
