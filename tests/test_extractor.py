@@ -101,6 +101,7 @@ def test_instructions_guard_against_guessing_and_injection():
 # --- Failures ---
 
 @pytest.mark.parametrize("error, message", [
+    (http_error(anthropic.BadRequestError, 400), "rejected the request"),
     (http_error(anthropic.AuthenticationError, 401), "key is missing or was rejected"),
     (http_error(anthropic.PermissionDeniedError, 403), "not allowed to use this model"),
     (http_error(anthropic.RateLimitError, 429), "spending limit"),

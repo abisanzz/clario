@@ -103,6 +103,8 @@ def ask_claude(client, content: list, schema: dict, system: str = SYSTEM_PROMPT,
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": content}],
         )
+    except anthropic.BadRequestError as error:
+        raise ExtractionFailed(f"Anthropic API rejected the request: {error.message}") from error
     except anthropic.AuthenticationError as error:
         raise ExtractionFailed("Anthropic API key is missing or was rejected") from error
     except anthropic.PermissionDeniedError as error:
