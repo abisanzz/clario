@@ -5,7 +5,18 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-CHECKLIST_PATH = Path(__file__).resolve().parent.parent / "docs" / "UK_Fintech_KYC_Checklist.xlsx"
+DOCS = Path(__file__).resolve().parent.parent / "docs"
+CHECKLIST_PATH = DOCS / "UK_Fintech_KYC_Checklist.xlsx"
+
+# The checklists a user can choose from: key -> (name shown to the user, spreadsheet)
+CHECKLISTS = {
+    "fintech": ("Fintech: payments and e-money", CHECKLIST_PATH),
+    "general": ("General business (not financial services)", DOCS / "UK_General_Business_KYC_Checklist.xlsx"),
+    "crypto": ("Crypto", DOCS / "UK_Crypto_KYC_Checklist.xlsx"),
+    "lending": ("Lending and credit", DOCS / "UK_Lending_KYC_Checklist.xlsx"),
+    "investment_firm": ("Investment firm", DOCS / "UK_Investment_Firm_KYC_Checklist.xlsx"),
+    "asset_management": ("Asset management", DOCS / "UK_Asset_Management_KYC_Checklist.xlsx"),
+}
 SHEET_NAME = "Checklist"
 
 # Spreadsheet heading -> field name on Check

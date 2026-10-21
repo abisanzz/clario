@@ -245,3 +245,20 @@ def test_companies_house_source_passes_on_lookup_failures():
         raise LookupFailed("no response from Companies House")
     with pytest.raises(LookupFailed):
         companies_house_source("12345678", summary=down)
+
+
+def test_another_checklist_is_used_when_chosen(tmp_path):
+    from services.checklist import CHECKLISTS
+
+    crypto = CHECKLISTS["crypto"][1]
+    crypto_ids = [c.id for c in load_checks(crypto)]
+    saved = tmp_path / "assessment.json"
+    run(saved_answer=saved)  # fintech answer saved
+
+    claude = FakeClaude({"checks": [], "facts": FACTS})
+    result = assess_pack(DOCS, LABELS, LINKS, saved_answer=saved, client=claude, company_lookup=active_company,
+                         today=TODAY, checklist=crypto)
+    assert len(claude.requests) == 1 and not result.replayed  # the fintech answer is not reused
+    assert [o.check.id for o in result.outcomes] == crypto_ids
+    text = claude.requests[0]["messages"][0]["content"][-1]["text"]
+    assert "Travel rule" in text

@@ -72,3 +72,23 @@ def test_saved_answer_is_replayed_free(tmp_path):
 
     changed = suggest_industry(DOCS, LABELS, LINKS[:1], saved_answer=saved, client=claude)
     assert not changed.replayed and len(claude.requests) == 1
+
+
+def test_each_industry_has_a_checklist():
+    from services.checklist import CHECKLISTS
+    from services.industry import checklist_for
+
+    assert checklist_for("payments") == ("fintech", True)
+    assert checklist_for("non_financial") == ("general", True)
+    assert checklist_for("asset_management") == ("asset_management", True)
+    assert checklist_for("insurance") == ("fintech", False)  # no specific checklist yet
+    for industry in INDUSTRIES:
+        key, _ = checklist_for(industry)
+        assert CHECKLISTS[key][1].exists(), key
+
+
+def test_claude_is_told_how_to_split_investment_firms_from_asset_managers():
+    claude = FakeClaude(REPLY)
+    suggest_industry(DOCS, LABELS, LINKS, client=claude)
+    assert "If the company manages funds (pooled money from many investors) it is asset management" in \
+        claude.requests[0]["system"]

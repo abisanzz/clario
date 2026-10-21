@@ -21,7 +21,8 @@ from services.companies_house import (  # noqa: E402
     parse_company_number,
 )
 from services.extractor import ExtractionFailed  # noqa: E402
-from services.industry import INDUSTRIES, SOURCES_AGREE, suggest_industry  # noqa: E402
+from services.checklist import CHECKLISTS  # noqa: E402
+from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
     DOCUMENT_TYPES,
     DocumentLabel,
@@ -55,6 +56,8 @@ STATUS_TEXT = {
 }
 TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
+CHECKLIST_KEY = {name: key for key, (name, _) in CHECKLISTS.items()}
+SAMPLE_CHECKLIST = "fintech"  # the checklist the sample pack's saved answer was made with
 
 
 @st.cache_data(ttl=3600, max_entries=50, show_spinner="Checking Companies House and the website...")
@@ -105,8 +108,8 @@ def show_industry(link_or_number: str) -> None:
 st.set_page_config(page_title="Clario KYC workspace", page_icon=":material/fact_check:", layout="wide")
 st.title("Clario KYC workspace")
 st.caption(
-    "Add everything you have for a company. Claude identifies each document and maps the evidence to all 32 items "
-    "of the KYC checklist; fixed rules and the live Companies House register check the legal-existence items. "
+    "Add everything you have for a company. Claude identifies each document, suggests the industry, and maps the evidence to "
+    "every item of the matching KYC checklist; fixed rules and the live Companies House register check the legal-existence items. "
     "Every result says why, and where it came from."
 )
 
@@ -192,10 +195,6 @@ with st.container(border=True):
         else f"Labels: about ${identification.cost_usd:.3f}"
     )
 
-# Results no longer match if the labels were changed
-if st.session_state.get("assessment") and st.session_state.assessment[0] != confirmed:
-    st.session_state.pop("assessment")
-
 # --- 3. Industry ---
 
 links_key = (tuple(confirmed), company_link.strip(), website.strip())
@@ -203,7 +202,7 @@ if st.session_state.get("industry") and st.session_state.industry[0] != links_ke
     st.session_state.pop("industry")  # documents, labels or links changed
 
 with st.container(border=True):
-    st.subheader(":material/domain: 3. Confirm the industry")
+    st.subheader(":material/domain: 3. Confirm the industry and checklist")
     if "industry" not in st.session_state:
         st.caption(
             "Claude reads the questionnaire, the Companies House record (including its industry codes) and the website, "
@@ -235,10 +234,24 @@ with st.container(border=True):
         "Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(suggestion.industry),
         key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
     )]
+    suggested_checklist, written_for_industry = checklist_for(industry)
+    checklist = CHECKLIST_KEY[st.selectbox(
+        "Checklist", [name for name, _ in CHECKLISTS.values()], index=list(CHECKLISTS).index(suggested_checklist),
+        key=f"checklist_{hash(links_key)}_{industry}",
+        help="Suggested from the industry. Choose another if a different checklist fits the company better.",
+    )]
+    if not written_for_industry:
+        st.caption(":material/info: There is no checklist written for this industry yet, so the fintech one is suggested.")
+    if checklist != suggested_checklist:
+        st.caption(":material/edit: You chose a different checklist from the one suggested for this industry.")
     st.caption(
         "Industry: replayed, $0.00" if suggestion.replayed
         else f"Industry: about ${suggestion.cost_usd:.3f}"
     )
+
+# Results no longer match if the labels or the checklist changed
+if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
+    st.session_state.pop("assessment")
 
 # --- 4. Run the checks ---
 
@@ -246,16 +259,23 @@ with st.container(border=True):
     st.subheader(":material/fact_check: 4. Run the KYC checks")
     if "assessment" not in st.session_state:
         st.caption("Claude reads every document again against the checklist (roughly 2p per document).")
+        replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
+        if source == "Sample pack" and not replay_sample:
+            st.caption(":material/payments: The sample's saved answer is for the fintech checklist; with this checklist "
+                       "Claude is asked again (about 20p).")
         if not st.button("Run KYC checks", type="primary", icon=":material/play_arrow:"):
             st.stop()
         sources, _ = fetch_links(company_link, website)
         with st.spinner("Claude is mapping the evidence to the checklist..."):
             try:
-                result = assess_pack(documents, confirmed, sources, saved_answer=saved_answers.get("assessment"))
+                result = assess_pack(
+                    documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
+                    saved_answer=saved_answers.get("assessment") if replay_sample else None,
+                )
             except ExtractionFailed as error:
                 st.error(f"Could not run the checks: {error}", icon=":material/error:")
                 st.stop()
-        st.session_state.assessment = (confirmed, result)
+        st.session_state.assessment = ((confirmed, checklist), result)
     result = st.session_state.assessment[1]
     total = identification.cost_usd + suggestion.cost_usd + result.cost_usd
     st.caption(
@@ -266,7 +286,10 @@ with st.container(border=True):
 # --- Results ---
 
 st.header("Results")
-st.caption(f"Industry: {INDUSTRIES[industry]}. The fintech checklist is used for every industry for now.")
+st.caption(
+    f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]} ({len(result.outcomes)} checks)"
+    + (", chosen by you instead of the suggested one." if checklist != suggested_checklist else ".")
+)
 with st.container(horizontal=True):
     for status, help_text in [
         (Status.PRESENT, "The evidence is there and consistent"),

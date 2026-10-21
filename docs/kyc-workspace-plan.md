@@ -39,7 +39,8 @@ Goal: pick the checklist that fits the company's industry (payments, crypto, inv
 
 1. **Show the industry codes (SIC codes) from Companies House** under the link box, with their official meanings (`data/sic_codes.csv`, from Companies House's public list). Free. **Done**
 2. **Claude suggests the industry** from the questionnaire, the Companies House record (with SIC codes) and the website (FCA permissions once step 7 is done), with reasons and quotes; the user confirms or changes it. A mismatch between sources is flagged. Only those sources are sent, so it costs about 2p (measured $0.027 on the sample). **Done**
-3. **The confirmed industry picks the checklist.** Needs one checklist spreadsheet per industry (to be written or drafted and reviewed).
+3. **The confirmed industry picks the checklist**, and the user can choose a different one from a dropdown. The checks run against the chosen checklist; saved answers are tied to the checklist's questions, so one checklist's answer is never replayed for another. **Done**
+4. **The analyst can change a result** after the checks run, with a note; the original answer is kept beside it.
 
 ### Checklists per industry
 

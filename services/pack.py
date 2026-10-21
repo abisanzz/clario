@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from services.checklist import Check, load_checks
+from services.checklist import CHECKLIST_PATH, Check, load_checks
 from services.documents import (
     ArticlesOfAssociation,
     CertificateOfIncorporation,
@@ -329,9 +329,10 @@ def assess_pack(
     client=None,
     company_lookup=None,
     today: date | None = None,
+    checklist: Path = CHECKLIST_PATH,
 ) -> PackAssessment:
-    """Check the whole pack against all 32 checklist items."""
-    checks = load_checks()
+    """Check the whole pack against every item on the chosen checklist (the fintech one unless told otherwise)."""
+    checks = load_checks(checklist)
     claude_checks = [c for c in checks if c.evidence_type in DOCUMENT_EVIDENCE]
     sources = list(sources)
     names = _source_names(documents, sources)
@@ -352,7 +353,8 @@ def assess_pack(
 
     fingerprint = hashlib.sha256(
         (pack_fingerprint(documents) + "".join(f"|{s.name}:{s.text}" for s in sources)
-         + "".join(f"|{label.name}={label.document_type}" for label in labels)).encode()
+         + "".join(f"|{label.name}={label.document_type}" for label in labels)
+         + "".join(f"|{c.id}:{c.check}:{c.evidence_source}" for c in claude_checks)).encode()
     ).hexdigest()
     raw, usage, replayed = saved_or_ask(saved_answer, fingerprint, lambda: ask_claude(
         client or make_client(),
