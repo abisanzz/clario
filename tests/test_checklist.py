@@ -1,7 +1,7 @@
 import pytest
 from openpyxl import Workbook
 
-from services.checklist import Check, load_checks
+from services.checklist import CHECKLIST_PATH, Check, load_checks
 
 HEADINGS = ["ID", "Section", "Check", "Evidence source", "Evidence type", "Status"]
 EVIDENCE_TYPES = {"Client document", "Client questionnaire", "Public register", "Screening tool", "Internal decision"}
@@ -59,3 +59,14 @@ def test_missing_column_gives_clear_error(tmp_path):
     path = make_workbook(tmp_path / "checklist.xlsx", [], headings=["ID", "Section", "Check"])
     with pytest.raises(ValueError, match="Evidence source, Evidence type"):
         load_checks(path)
+
+
+@pytest.mark.parametrize("path", sorted(CHECKLIST_PATH.parent.glob("UK_*_KYC_Checklist.xlsx")), ids=lambda p: p.stem)
+def test_every_industry_checklist_is_well_formed(path):
+    """Each checklist keeps the fintech sections and evidence types, so the app and the Summary tab can read it."""
+    fintech = load_checks()
+    checks = load_checks(path)
+    assert len({c.id for c in checks}) == len(checks)
+    assert {c.section for c in checks} == {c.section for c in fintech}
+    assert {c.evidence_type for c in checks} <= {c.evidence_type for c in fintech}
+    assert [c for c in checks if c.section == "1. Legal existence"] == fintech[:4]  # the rules for 1.1-1.4 apply
