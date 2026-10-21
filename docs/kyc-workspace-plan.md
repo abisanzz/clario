@@ -32,3 +32,11 @@ Goal: the first page is a workspace where the user uploads **every document they
 - The answer format for the mapping call avoids "can be empty" fields: the API allows at most 16 of them.
 - Prompt caching does not carry over from identifying to mapping (different effort settings), so it is not used yet.
 - To tidy: the certificate's legal form was copied as a sentence fragment; tighten the instruction at the next paid re-run.
+
+## Industry-specific checklists (next)
+
+Goal: pick the checklist that fits the company's industry (payments, crypto, investment management, ...).
+
+1. **Show the industry codes (SIC codes) from Companies House** under the link box, with their official meanings (`data/sic_codes.csv`, from Companies House's public list). Free. **Done**
+2. **Claude suggests the industry** from the SIC codes, FCA permissions, questionnaire and website, with reasons; the user confirms or changes it. A mismatch between sources is flagged.
+3. **The confirmed industry picks the checklist.** Needs one checklist spreadsheet per industry (to be written or drafted and reviewed).

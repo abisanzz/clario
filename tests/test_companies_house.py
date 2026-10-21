@@ -84,7 +84,12 @@ def test_key_never_appears_in_error_messages(key, monkeypatch, error):
 
 # --- Links, officers, PSC and the summary ---
 
-from services.companies_house import companies_house_summary, parse_company_number  # noqa: E402
+from services.companies_house import (  # noqa: E402
+    companies_house_summary,
+    nature_of_business,
+    parse_company_number,
+    sic_description,
+)
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -121,7 +126,8 @@ def fake_register(monkeypatch, replies):
 PROFILE = (b'{"company_name": "EXAMPLE PAYMENTS LTD", "company_status": "active", "type": "ltd",'
            b' "date_of_creation": "2019-03-14", "registered_office_address": {"address_line_1": "1 Example Street",'
            b' "locality": "London", "postal_code": "EX1 1AA"}, "accounts": {"next_due": "2027-06-30", "overdue": false},'
-           b' "confirmation_statement": {"next_due": "2027-03-14", "overdue": false}}')
+           b' "confirmation_statement": {"next_due": "2027-03-14", "overdue": false},'
+           b' "sic_codes": ["64999", "62012"]}')
 OFFICERS = (b'{"items": [{"name": "SAMPLE, Alex", "officer_role": "director", "appointed_on": "2019-03-14"},'
             b' {"name": "OLD, Pat", "officer_role": "director", "appointed_on": "2019-03-14", "resigned_on": "2020-01-01"}]}')
 PSC = (b'{"items": [{"name": "Alex Sample", "notified_on": "2019-03-14",'
@@ -133,6 +139,8 @@ def test_summary_lists_profile_officers_and_psc(key, monkeypatch):
     summary = companies_house_summary("12345678")
     assert "Company name: EXAMPLE PAYMENTS LTD" in summary
     assert "Registered office: 1 Example Street, London, EX1 1AA" in summary
+    assert ("Nature of business (SIC codes): 64999 Financial intermediation not elsewhere classified; "
+            "62012 Business and domestic software development") in summary
     assert "- SAMPLE, Alex - director, appointed 2019-03-14" in summary
     assert "- OLD, Pat - director, appointed 2019-03-14, resigned 2020-01-01" in summary
     assert "- Alex Sample - ownership of shares 50 to 75 percent; voting rights 50 to 75 percent" in summary
@@ -150,3 +158,19 @@ def test_summary_for_unknown_company_raises(key, monkeypatch):
     fake_register(monkeypatch, {"/company/12345678": http_error(404)})
     with pytest.raises(CompanyNotFound):
         companies_house_summary("12345678")
+
+
+def test_sic_description():
+    assert sic_description("64999") == "Financial intermediation not elsewhere classified"
+    assert sic_description(" 99999 ") == "Dormant Company"
+    assert sic_description("00000") == "not in the official list"
+
+
+def test_nature_of_business():
+    assert nature_of_business({"sic_codes": ["66190"]}) == [("66190", "Activities auxiliary to financial intermediation not elsewhere classified")]
+    assert nature_of_business({}) == []
+
+
+def test_summary_says_when_no_sic_codes(key, monkeypatch):
+    fake_register(monkeypatch, {"/company/12345678": b'{"company_name": "X"}'})
+    assert "Nature of business (SIC codes): none listed" in companies_house_summary("12345678")

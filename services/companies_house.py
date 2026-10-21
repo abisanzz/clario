@@ -1,6 +1,7 @@
 """Fetch company records from the Companies House API."""
 
 import base64
+import csv
 import json
 import os
 import re
@@ -13,6 +14,8 @@ from dotenv import load_dotenv
 
 API_BASE = "https://api.company-information.service.gov.uk"
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+# Official SIC code meanings, from Companies House's public list (github.com/companieshouse/api-enumerations)
+SIC_CODES_PATH = Path(__file__).resolve().parent.parent / "data" / "sic_codes.csv"
 TIMEOUT_SECONDS = 15
 
 
@@ -78,6 +81,19 @@ def parse_company_number(link_or_number: str) -> str | None:
     return candidate if re.fullmatch(r"\d{8}|[A-Z]{2}\d{6}", candidate) else None
 
 
+def sic_description(code: str) -> str:
+    """What a SIC (Standard Industrial Classification) code means, e.g. 64999 -> Financial intermediation..."""
+    if not hasattr(sic_description, "table"):
+        with open(SIC_CODES_PATH, newline="") as file:
+            sic_description.table = {row["code"]: row["description"] for row in csv.DictReader(file)}
+    return sic_description.table.get(str(code).strip(), "not in the official list")
+
+
+def nature_of_business(profile: dict) -> list[tuple[str, str]]:
+    """The company's SIC codes from its Companies House record, each with its meaning."""
+    return [(code, sic_description(code)) for code in profile.get("sic_codes") or []]
+
+
 def _readable(value: str) -> str:
     return str(value).replace("-", " ")
 
@@ -91,6 +107,8 @@ def companies_house_summary(company_number: str) -> str:
         f"Status: {profile.get('company_status', 'not shown')}",
         f"Company type: {_readable(profile.get('type', 'not shown'))}",
         f"Date of creation: {profile.get('date_of_creation', 'not shown')}",
+        "Nature of business (SIC codes): "
+        + ("; ".join(f"{code} {meaning}" for code, meaning in nature_of_business(profile)) or "none listed"),
     ]
     office = profile.get("registered_office_address") or {}
     if office:

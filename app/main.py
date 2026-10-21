@@ -13,7 +13,13 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # so "services" can be imported when Streamlit runs this file
 
-from services.companies_house import LookupFailed  # noqa: E402
+from services.companies_house import (  # noqa: E402
+    CompanyNotFound,
+    LookupFailed,
+    get_company,
+    nature_of_business,
+    parse_company_number,
+)
 from services.extractor import ExtractionFailed  # noqa: E402
 from services.pack import (  # noqa: E402
     DOCUMENT_TYPES,
@@ -43,6 +49,35 @@ STATUS_TEXT = {
     Status.NOT_STARTED: "⏳ Not started",
 }
 TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
+
+
+@st.cache_data(ttl=3600, max_entries=50, show_spinner="Looking up Companies House...")
+def industry_codes(company_number: str) -> list[tuple[str, str]] | str:
+    """The company's SIC codes with their meanings, or a sentence saying why there are none."""
+    try:
+        return nature_of_business(get_company(company_number))
+    except CompanyNotFound:
+        return "This company is not on the Companies House register, so there are no industry codes."
+    except LookupFailed as error:
+        return f"Companies House could not be checked ({error})."
+
+
+def show_industry(link_or_number: str) -> None:
+    """Show the company's industry codes (SIC codes) from Companies House under the link box."""
+    if not link_or_number.strip():
+        return
+    number = parse_company_number(link_or_number)
+    if not number:
+        st.caption(":material/warning: That is not a Companies House link or company number.")
+        return
+    codes = industry_codes(number)
+    if isinstance(codes, str):
+        st.caption(f":material/info: {codes}")
+    elif not codes:
+        st.caption(":material/info: Companies House lists no industry codes for this company.")
+    else:
+        st.markdown("**Industry (SIC codes on Companies House)**  \n" + "  \n".join(
+            f":blue-badge[{code}] {meaning}" for code, meaning in codes))
 
 st.set_page_config(page_title="Clario KYC workspace", page_icon=":material/fact_check:", layout="wide")
 st.title("Clario KYC workspace")
@@ -80,6 +115,7 @@ with st.container(border=True):
         key=f"company_link_{source}",
         placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
     )
+    show_industry(company_link)
     website = st.text_input("Company website (optional)", key=f"website_{source}", placeholder="e.g. example.com")
     st.text_input("FCA register link", disabled=True, placeholder="Coming soon",
                   help="Needs a free FCA API key; the FCA checks (Section 2) show as missing until then.")
