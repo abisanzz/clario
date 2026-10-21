@@ -1,7 +1,9 @@
 from datetime import date
 
 from services.checklist import load_checks
-from services.companies_house import CompanyNotFound
+import pytest
+
+from services.companies_house import CompanyNotFound, LookupFailed
 from services.pack import (
     DECIDED_ELSEWHERE,
     DOCUMENT_EVIDENCE,
@@ -9,6 +11,7 @@ from services.pack import (
     LinkedSource,
     UploadedDocument,
     assess_pack,
+    companies_house_source,
 )
 from services.validator import Status
 from tests.fakes import FakeClaude
@@ -217,3 +220,28 @@ def test_questionnaire_answers_become_yes_no_or_unknown():
     for answer_text, expected in (("no", Status.UNCLEAR), ("not answered", Status.UNCLEAR)):
         result, _ = run(answer(facts={"trades_from_registered_office": fact(answer_text, source=3)}))
         assert outcome(result, "1.2").status is expected
+
+
+def test_companies_house_source_from_link():
+    source = companies_house_source(
+        "https://find-and-update.company-information.service.gov.uk/company/12345678", summary=lambda n: f"record {n}")
+    assert source == LinkedSource("Companies House record", "record 12345678")
+
+
+def test_companies_house_source_for_unknown_company():
+    def not_found(number):
+        raise CompanyNotFound(number)
+    source = companies_house_source("99999901", summary=not_found)
+    assert source.text == "There is no company with number 99999901 on the Companies House register."
+
+
+def test_companies_house_source_rejects_text_without_a_number():
+    with pytest.raises(ValueError, match="not a Companies House link"):
+        companies_house_source("hello")
+
+
+def test_companies_house_source_passes_on_lookup_failures():
+    def down(number):
+        raise LookupFailed("no response from Companies House")
+    with pytest.raises(LookupFailed):
+        companies_house_source("12345678", summary=down)

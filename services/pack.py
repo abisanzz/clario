@@ -244,6 +244,21 @@ class LinkedSource:
     text: str
 
 
+def companies_house_source(link_or_number: str, summary=None) -> LinkedSource:
+    """The Companies House record as text for Claude. Raises ValueError if there is no company number in the input,
+    and LookupFailed if Companies House can't be reached."""
+    from services.companies_house import CompanyNotFound, companies_house_summary, parse_company_number
+
+    number = parse_company_number(link_or_number)
+    if not number:
+        raise ValueError(f"'{link_or_number}' is not a Companies House link or company number")
+    try:
+        text = (summary or companies_house_summary)(number)
+    except CompanyNotFound:
+        text = f"There is no company with number {number} on the Companies House register."
+    return LinkedSource("Companies House record", text)
+
+
 @dataclass(frozen=True)
 class CheckOutcome:
     check: Check

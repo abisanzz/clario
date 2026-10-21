@@ -19,10 +19,16 @@ Goal: the first page is a workspace where the user uploads **every document they
 
 ## Order of work
 
-1. **Fake document pack** for EXAMPLE PAYMENTS LTD (certificate, proof of address, articles, shareholder register, ID verification report, onboarding/AML questionnaire, board resolution), with deliberate gaps (e.g. no ownership chart) and one inconsistency, so the demo shows Present, Missing and Unclear.
-2. **Links:** Companies House officers and PSC lookups; website text fetcher. Each becomes a text "document" that Claude can read.
-3. **Document identifier** (Claude), with tests using a fake Claude.
-4. **Evidence mapper** for all 32 checks (Claude) plus merging with the Section 1 rules, with tests.
-5. **New workspace page:** upload, links, identify and confirm, run, results and request list.
-6. **Real run** on the fake pack; measure cost; save answers for free demos.
+1. **Fake document pack** for EXAMPLE PAYMENTS LTD (certificate, proof of address, articles, shareholder register, ID verification report, onboarding/AML questionnaire, board resolution), with deliberate gaps (e.g. no ownership chart) and one inconsistency, so the demo shows Present, Missing and Unclear. **Done**
+2. **Links:** Companies House officers and PSC lookups; website text fetcher. Each becomes a text "document" that Claude can read. **Done**
+3. **Document identifier** (Claude), with tests using a fake Claude. **Done**
+4. **Evidence mapper** for all 32 checks (Claude) plus merging with the Section 1 rules, with tests. **Done**
+5. **New workspace page:** upload, links, identify and confirm, run, results and request list. **Done**
+6. **Real run** on the fake pack; measure cost; save answers for free demos. **Done** (about $0.09 to identify + $0.20 to map; saved answers replay free)
 7. **FCA register** link, once an FCA API key is set up.
+
+## Notes from building
+
+- The answer format for the mapping call avoids "can be empty" fields: the API allows at most 16 of them.
+- Prompt caching does not carry over from identifying to mapping (different effort settings), so it is not used yet.
+- To tidy: the certificate's legal form was copied as a sentence fragment; tighten the instruction at the next paid re-run.
