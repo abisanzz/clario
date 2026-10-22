@@ -34,6 +34,7 @@ from services.pack import (  # noqa: E402
     identify_documents,
     pack_fingerprint,
 )
+from services.reviews import apply_overrides, case_file, load_overrides, remove_override, save_override  # noqa: E402
 from services.validator import Status  # noqa: E402
 from services.website import WebsiteFetchFailed, website_text  # noqa: E402
 
@@ -276,12 +277,17 @@ with st.container(border=True):
                 st.error(f"Could not run the checks: {error}", icon=":material/error:")
                 st.stop()
         st.session_state.assessment = ((confirmed, checklist), result)
-    result = st.session_state.assessment[1]
-    total = identification.cost_usd + suggestion.cost_usd + result.cost_usd
+    original = st.session_state.assessment[1]
+    total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
     st.caption(
-        "Checks: replayed, $0.00" if result.replayed
-        else f"Checks: about ${result.cost_usd:.3f}. Total for this company: about ${total:.3f}"
+        "Checks: replayed, $0.00" if original.replayed
+        else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}"
     )
+
+# The analyst's saved changes for this set of documents and checklist
+review_path = case_file(pack_key, checklist)
+overrides = load_overrides(review_path)
+result = apply_overrides(original, overrides)
 
 # --- Results ---
 
@@ -289,6 +295,7 @@ st.header("Results")
 st.caption(
     f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]} ({len(result.outcomes)} checks)"
     + (", chosen by you instead of the suggested one." if checklist != suggested_checklist else ".")
+    + (f" {len(overrides)} result(s) changed by an analyst." if overrides else "")
 )
 with st.container(horizontal=True):
     for status, help_text in [
@@ -329,6 +336,7 @@ for section, outcomes in groupby(result.outcomes, key=lambda o: o.check.section)
                     "Evidence": o.evidence,
                     "Decided by": o.decided_by,
                     "Claude's view": o.claude_finding,
+                    "Before the analyst's change": o.before_review,
                 }
                 for o in outcomes
             ]),
@@ -337,9 +345,50 @@ for section, outcomes in groupby(result.outcomes, key=lambda o: o.check.section)
                 "Finding": st.column_config.TextColumn(width="large"),
                 "Evidence": st.column_config.ListColumn(width="large"),
                 "Claude's view": st.column_config.TextColumn(help="Shown when the fixed rules made the decision"),
+                "Before the analyst's change": st.column_config.TextColumn(
+                    help="The original answer from Claude or the rules, shown when an analyst changed it"),
             },
             hide_index=True,
         )
+
+# --- Analyst review ---
+
+with st.container(border=True):
+    st.subheader(":material/rate_review: Review a check")
+    st.caption(
+        "Change a result once you have looked at the evidence. The original answer is kept beside yours. "
+        ":material/lock: Saved on this computer only (the reviews folder), never sent to Claude or committed."
+    )
+    outcome_by_id = {o.check.id: o for o in result.outcomes}
+    with st.form("review", clear_on_submit=True):
+        check_id = st.selectbox(
+            "Check", list(outcome_by_id),
+            format_func=lambda i: f"{i} · {outcome_by_id[i].check.check[:90]} ({outcome_by_id[i].status.value})",
+        )
+        new_status = Status(st.segmented_control(
+            "New status", [s.value for s in STATUS_TEXT], default=Status.PRESENT.value, required=True))
+        note = st.text_area("Reason", placeholder="e.g. Client confirmed by email on 22 Oct that Jamie Example holds 25%")
+        reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""))
+        if st.form_submit_button("Save change", type="primary", icon=":material/save:"):
+            try:
+                save_override(review_path, original, check_id, new_status, note, reviewer)
+            except ValueError as error:
+                st.error(str(error), icon=":material/error:")
+            else:
+                st.session_state.last_reviewer = reviewer.strip()
+                st.rerun()
+
+    if overrides:
+        st.markdown("**Saved changes**")
+    for saved in overrides.values():
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown(
+                f"**{saved.check_id}** · {saved.original_status.value} → **{saved.status.value}** "
+                f"by {saved.reviewer} on {saved.reviewed_on}: {saved.note}",
+                width="stretch",
+            )
+            st.button("Undo", key=f"undo_{saved.check_id}", icon=":material/undo:",
+                      on_click=remove_override, args=(review_path, saved.check_id))
 
 st.caption(
     "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "

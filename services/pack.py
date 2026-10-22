@@ -267,6 +267,7 @@ class CheckOutcome:
     evidence: list[str] = field(default_factory=list)  # "source p.N: quote"
     decided_by: str = "Claude"  # "Rules", "Claude", or who decides it if not assessed here
     claude_finding: str = ""  # Claude's view, kept when the rules decide
+    before_review: str = ""  # the original answer, when an analyst has changed it
 
 
 @dataclass(frozen=True)

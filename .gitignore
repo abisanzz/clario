@@ -17,3 +17,6 @@ uploads/
 
 # Excel lock files, present while a spreadsheet is open
 ~$*
+
+# Analysts' changes to results (case notes stay on this computer)
+reviews/
