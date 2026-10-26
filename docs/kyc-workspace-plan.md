@@ -44,10 +44,10 @@ Goal: pick the checklist that fits the company's industry (payments, crypto, inv
 
 ### Checklists per industry
 
-Drafted by Claude for review (21 Oct 2026), built by `scripts/make_industry_checklists.py` from the fintech checklist:
-general business, crypto, lending, investment firm and asset management. Credit rating agencies were dropped (too niche).
-All keep the fintech sections so the app and the Summary tab read them unchanged. New key figures are marked unchecked;
-a compliance professional must review every draft before it is relied on. Edit the script, not the spreadsheets.
+Drafted by Claude (21 Oct 2026) and approved as written by a compliance professional (26 Oct 2026); built by
+`scripts/make_industry_checklists.py` from the fintech checklist: general business, crypto, lending, investment firm and
+asset management. Credit rating agencies were dropped (too niche). All keep the fintech sections so the app and the
+Summary tab read them unchanged. Edit the script, not the spreadsheets; any content change needs a fresh review.
 
 To connect: industry options become payments and e-money (fintech checklist), crypto, lending, investment firm,
 asset management, not a financial business (general), and banking / insurance / other financial (fintech for now,

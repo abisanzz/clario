@@ -4,7 +4,8 @@ Each draft keeps the fintech workbook's layout, drop-downs, colours and Summary 
 apply to any company and are copied as they are; sections 2 and 5 and checks 7.2 and 8.2 change by
 industry.
 
-DRAFTS FOR REVIEW: written from general knowledge of UK rules, not checked against current legislation or FCA rules.
+Drafted by Claude from general knowledge of UK rules, then approved as written by a compliance professional
+(see REVIEWED_ON). Any change to the content below needs a fresh compliance review.
 Run from the project folder (overwrites the drafts):  .venv/bin/python scripts/make_industry_checklists.py
 """
 
@@ -16,7 +17,8 @@ import openpyxl
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 TEMPLATE = DOCS / "UK_Fintech_KYC_Checklist.xlsx"
 DRAFTED_ON = "21 Oct 2026"
-UNCHECKED = "Draft by Claude, not checked against current text"
+REVIEWED_ON = "26 Oct 2026"
+REVIEWED = f"Reviewed by compliance, {REVIEWED_ON}"
 
 CLIENT_DOC, QUESTIONNAIRE, REGISTER, SCREENING, INTERNAL = (
     "Client document", "Client questionnaire", "Public register", "Screening tool", "Internal decision")
@@ -320,19 +322,19 @@ def build(key: str, industry: dict) -> Path:
     start = figures.max_row + 1
     for offset, (figure, meaning, used_in, source) in enumerate(industry["figures"]):
         copy_style(figures, start - 1, start + offset, 5)
-        for column, value in enumerate((figure, meaning, used_in, source, UNCHECKED), start=1):
+        for column, value in enumerate((figure, meaning, used_in, source, REVIEWED), start=1):
             figures.cell(start + offset, column).value = value
 
     guide = workbook["Guide"]
-    guide["A2"] = (f"DRAFT FOR REVIEW: drafted by Claude on {DRAFTED_ON} from general knowledge of UK rules. "
-                   "Have a compliance professional check every row before relying on it.")
-    guide["A2"].font = openpyxl.styles.Font(b=True, sz=11, color="FFC00000")
+    guide["A2"] = (f"Drafted by Claude on {DRAFTED_ON} and approved by a compliance professional on {REVIEWED_ON}. "
+                   "Recheck dates and thresholds against current rules when the regulations change.")
+    guide["A2"].font = openpyxl.styles.Font(i=True, sz=11)
     guide["B25"] = f"The client is {industry['client']}, being onboarded as a corporate client by a regulated " \
                    "financial-services firm."
     extra = [
         "Sections 2 and 5, checks 7.2 and 8.2, and any check added at the end of section 3 are specific to this "
         "industry; everything else is the same as the fintech checklist.",
-        "Key figures added for this industry are marked 'Draft by Claude, not checked against current text'.",
+        f"Key figures added for this industry are marked '{REVIEWED}'.",
     ]
     for offset, text in enumerate(extra, start=31):
         copy_style(guide, 30, offset, 2)
@@ -345,4 +347,4 @@ def build(key: str, industry: dict) -> Path:
 
 if __name__ == "__main__":
     for key, industry in INDUSTRIES.items():
-        print("Drafted", build(key, industry).name)
+        print("Built", build(key, industry).name)
