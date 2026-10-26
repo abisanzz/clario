@@ -48,6 +48,7 @@ SAMPLE_ANSWERS = {
     "assessment": SAMPLES / "pack_assessment.answer.json",
 }
 SAMPLE_COMPANY_NUMBER = "99999901"
+SAMPLE_FCA_FRN = "999999"  # the specimen FRN in the sample questionnaire; not on the FCA register
 UPLOAD_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "gif"]
 
 STATUS_TEXT = {
@@ -186,6 +187,7 @@ with st.container(border=True):
     website = st.text_input("Company website (optional)", key=f"website_{source}", placeholder="e.g. example.com")
     fca_frn = st.text_input(
         "FCA firm reference number (optional)", key=f"fca_{source}", placeholder="e.g. 730427",
+        value=SAMPLE_FCA_FRN if source == "Sample pack" else "",
         help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
     )
     show_fca_firm(fca_frn, company_link)

@@ -54,4 +54,4 @@ asset management, not a financial business (general), and banking / insurance / 
 flagged as having no specific checklist). Rule for Claude: if it manages funds it is an asset manager, otherwise an
 investment firm.
 - FCA register API: requests need a named User-Agent (its security service blocks Python's default with "error code: 1010"). "Firm not found" comes back as a normal reply with no data. Public register links use an internal ID, not the FRN, so the page asks for the FRN.
-- The sample pack leaves the FCA box empty so its saved answers still replay free; its questionnaire's specimen FRN 999999 is not on the register.
+- The sample pack fills in its questionnaire's specimen FRN 999999, which is not on the register, so the demo shows Claude catching a claimed licence the register does not support (2.1 Unclear, 2.2-2.4 Missing). Its saved answers were re-made with the FCA record for $0.24 and replay free.

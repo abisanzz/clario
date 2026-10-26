@@ -1,27 +1,27 @@
 {
-  "input_sha256": "6d5e82273912e2d075d05facfa215496b61c52cb2675c023b740da57825e35b7",
+  "input_sha256": "352c49673099bc0403b56a6df158dfc88e78a3bcec59c96d253c0011d3cd8f81",
   "model": "claude-opus-5-5",
   "answer": {
     "industry": "payments",
-    "reason": "The questionnaire describes an Authorised Payment Institution running a payments app for small UK and Irish businesses to collect card and open-banking payments, with safeguarded customer funds. The Companies House lookup returned no company for number 99999901, so the business description rests on the client's own questionnaire alone; the analyst should treat the missing registration as a warning sign and verify the company number and the FCA authorisation.",
+    "reason": "The questionnaire describes a payments app for small businesses to collect card and open-banking payments, and claims Authorised Payment Institution status with safeguarded customer funds. However, neither the Companies House record nor the FCA register could find the company or firm reference 999999, so the claimed registration and authorisation are unverified. This is a serious warning sign the analyst must investigate.",
     "sources_agree": "one source",
     "disagreement": "",
     "evidence": [
       {
         "source_number": 1,
+        "quote": "Q4. Business model: a payments app that lets small UK and Irish businesses collect card and open-banking payments."
+      },
+      {
+        "source_number": 1,
         "quote": "Authorised Payment Institution, FCA firm reference number 999999 (specimen)."
-      },
-      {
-        "source_number": 1,
-        "quote": "Business model: a payments app that lets small UK and Irish businesses collect card and open-banking payments."
-      },
-      {
-        "source_number": 1,
-        "quote": "Customer funds are safeguarded in a segregated safeguarding account with Example Bank plc, reconciled daily."
       },
       {
         "source_number": 2,
         "quote": "There is no company with number 99999901 on the Companies House register."
+      },
+      {
+        "source_number": 3,
+        "quote": "There is no firm with reference number 999999 on the FCA Financial Services Register."
       }
     ]
   }
