@@ -21,6 +21,7 @@ from services.companies_house import (  # noqa: E402
     parse_company_number,
 )
 from services.extractor import ExtractionFailed  # noqa: E402
+from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
 from services.checklist import CHECKLISTS  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
@@ -31,6 +32,7 @@ from services.pack import (  # noqa: E402
     UploadedDocument,
     assess_pack,
     companies_house_source,
+    fca_source,
     identify_documents,
     pack_fingerprint,
 )
@@ -61,15 +63,20 @@ CHECKLIST_KEY = {name: key for key, (name, _) in CHECKLISTS.items()}
 SAMPLE_CHECKLIST = "fintech"  # the checklist the sample pack's saved answer was made with
 
 
-@st.cache_data(ttl=3600, max_entries=50, show_spinner="Checking Companies House and the website...")
-def fetch_links(company_link: str, website: str) -> tuple[list[LinkedSource], list[str]]:
-    """The Companies House record and website text, plus a warning for each link that could not be read."""
+@st.cache_data(ttl=3600, max_entries=50, show_spinner="Checking Companies House, the FCA register and the website...")
+def fetch_links(company_link: str, website: str, fca_frn: str = "") -> tuple[list[LinkedSource], list[str]]:
+    """The Companies House record, FCA register entry and website text, plus a warning for each that could not be read."""
     sources, warnings = [], []
     if parse_company_number(company_link):
         try:
             sources.append(companies_house_source(company_link))
         except LookupFailed as error:
             warnings.append(f"Companies House could not be checked ({error}); continuing without it.")
+    if parse_frn(fca_frn):
+        try:
+            sources.append(fca_source(fca_frn))
+        except FcaLookupFailed as error:
+            warnings.append(f"The FCA register could not be checked ({error}); continuing without it.")
     if website.strip():
         try:
             sources.append(LinkedSource("Company website", website_text(website)))
@@ -87,6 +94,39 @@ def industry_codes(company_number: str) -> list[tuple[str, str]] | str:
         return "This company is not on the Companies House register, so there are no industry codes."
     except LookupFailed as error:
         return f"Companies House could not be checked ({error})."
+
+
+@st.cache_data(ttl=3600, max_entries=50, show_spinner="Looking up the FCA register...")
+def fca_firm(frn: str) -> dict | str:
+    """The firm's main FCA register entry, or a sentence saying why there is none."""
+    try:
+        return get_firm(frn)
+    except FirmNotFound:
+        return f"There is no firm with reference number {frn} on the FCA register."
+    except FcaLookupFailed as error:
+        return f"The FCA register could not be checked ({error})."
+
+
+def show_fca_firm(text: str, company_link: str) -> None:
+    """Show the firm's name and status under the FCA box, and flag a Companies House number that does not match."""
+    if not text.strip():
+        return
+    frn = parse_frn(text)
+    if not frn:
+        st.caption(":material/warning: That is not an FCA firm reference number (6 or 7 digits).")
+        return
+    firm = fca_firm(frn)
+    if isinstance(firm, str):
+        st.caption(f":material/info: {firm}")
+        return
+    company_number = firm.get("Companies House Number") or ""
+    st.markdown(
+        f"**{firm.get('Organisation Name', 'Name not shown')}** :blue-badge[{firm.get('Status', 'status not shown')}]"
+        + (f"  \nCompanies House number on the FCA register: {company_number}" if company_number else ""))
+    entered = parse_company_number(company_link)
+    if entered and company_number and company_number.upper() != entered:
+        st.warning(f"The FCA register links this firm to company {company_number}, not {entered}. "
+                   "Check you have the right firm.", icon=":material/warning:")
 
 
 def show_industry(link_or_number: str) -> None:
@@ -110,7 +150,7 @@ st.set_page_config(page_title="Clario KYC workspace", page_icon=":material/fact_
 st.title("Clario KYC workspace")
 st.caption(
     "Add everything you have for a company. Claude identifies each document, suggests the industry, and maps the evidence to "
-    "every item of the matching KYC checklist; fixed rules and the live Companies House register check the legal-existence items. "
+    "every item of the matching KYC checklist; fixed rules and the live Companies House and FCA registers back it up. "
     "Every result says why, and where it came from."
 )
 
@@ -144,8 +184,11 @@ with st.container(border=True):
     )
     show_industry(company_link)
     website = st.text_input("Company website (optional)", key=f"website_{source}", placeholder="e.g. example.com")
-    st.text_input("FCA register link", disabled=True, placeholder="Coming soon",
-                  help="Needs a free FCA API key; the FCA checks (Section 2) show as missing until then.")
+    fca_frn = st.text_input(
+        "FCA firm reference number (optional)", key=f"fca_{source}", placeholder="e.g. 730427",
+        help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
+    )
+    show_fca_firm(fca_frn, company_link)
 
 # Start again whenever the set of documents changes
 pack_key = pack_fingerprint(documents) if documents else None
@@ -198,7 +241,7 @@ with st.container(border=True):
 
 # --- 3. Industry ---
 
-links_key = (tuple(confirmed), company_link.strip(), website.strip())
+links_key = (tuple(confirmed), company_link.strip(), website.strip(), fca_frn.strip())
 if st.session_state.get("industry") and st.session_state.industry[0] != links_key:
     st.session_state.pop("industry")  # documents, labels or links changed
 
@@ -206,12 +249,13 @@ with st.container(border=True):
     st.subheader(":material/domain: 3. Confirm the industry and checklist")
     if "industry" not in st.session_state:
         st.caption(
-            "Claude reads the questionnaire, the Companies House record (including its industry codes) and the website, "
+            "Claude reads the questionnaire, the Companies House record (including its industry codes), the FCA register "
+            "entry and the website, "
             "and suggests which industry the company is in (roughly 1-2p)."
         )
         if not st.button("Suggest the industry", type="primary", icon=":material/search:"):
             st.stop()
-        sources, link_warnings = fetch_links(company_link, website)
+        sources, link_warnings = fetch_links(company_link, website, fca_frn)
         for warning in link_warnings:
             st.warning(warning, icon=":material/warning:")
         with st.spinner("Claude is working out the industry..."):
@@ -266,7 +310,7 @@ with st.container(border=True):
                        "Claude is asked again (about 20p).")
         if not st.button("Run KYC checks", type="primary", icon=":material/play_arrow:"):
             st.stop()
-        sources, _ = fetch_links(company_link, website)
+        sources, _ = fetch_links(company_link, website, fca_frn)
         with st.spinner("Claude is mapping the evidence to the checklist..."):
             try:
                 result = assess_pack(

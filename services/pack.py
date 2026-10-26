@@ -259,6 +259,21 @@ def companies_house_source(link_or_number: str, summary=None) -> LinkedSource:
     return LinkedSource("Companies House record", text)
 
 
+def fca_source(text: str, summary=None) -> LinkedSource:
+    """The FCA register entry as text for Claude. Raises ValueError if there is no firm reference number in the input,
+    and FcaLookupFailed if the register can't be reached."""
+    from services.fca import FirmNotFound, fca_summary, parse_frn
+
+    frn = parse_frn(text)
+    if not frn:
+        raise ValueError(f"'{text}' is not an FCA firm reference number (6 or 7 digits)")
+    try:
+        body = (summary or fca_summary)(frn)
+    except FirmNotFound:
+        body = f"There is no firm with reference number {frn} on the FCA Financial Services Register."
+    return LinkedSource("FCA register record", body)
+
+
 @dataclass(frozen=True)
 class CheckOutcome:
     check: Check

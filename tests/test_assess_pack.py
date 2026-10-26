@@ -262,3 +262,25 @@ def test_another_checklist_is_used_when_chosen(tmp_path):
     assert [o.check.id for o in result.outcomes] == crypto_ids
     text = claude.requests[0]["messages"][0]["content"][-1]["text"]
     assert "Travel rule" in text
+
+
+def test_fca_source_from_a_reference_number():
+    from services.pack import fca_source
+    assert fca_source("FRN 730427", summary=lambda frn: f"entry {frn}") == LinkedSource("FCA register record",
+                                                                                         "entry 730427")
+
+
+def test_fca_source_for_unknown_firm():
+    from services.fca import FirmNotFound
+    from services.pack import fca_source
+
+    def not_found(frn):
+        raise FirmNotFound(frn)
+    assert fca_source("999999", summary=not_found).text == (
+        "There is no firm with reference number 999999 on the FCA Financial Services Register.")
+
+
+def test_fca_source_rejects_text_without_a_reference_number():
+    from services.pack import fca_source
+    with pytest.raises(ValueError, match="not an FCA firm reference number"):
+        fca_source("monzo")

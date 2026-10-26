@@ -11,7 +11,7 @@ Goal: the first page is a workspace where the user uploads **every document they
 - **Links:**
   - *Companies House* (link or company number): company profile, officers and persons with significant control (PSC), from the free API. Used for 1.1, 1.3, 3.4, 4.1.
   - *Company website*: page text fetched on this computer, used as supporting evidence for Section 5.
-  - *FCA register*: needs a free FCA API key (to be set up later). Used for Section 2.
+  - *FCA register*: firm reference number (FRN), from the free FCA register API (email and key in .env). Used for Section 2 and the industry.
 - **Statuses** are the checklist's own: Present, Missing, Unclear, Needs human review, Not started.
 - **Results page:** summary counts (like the spreadsheet's Summary tab), every check grouped by section with evidence, and two lists built from Missing or Unclear checks: **"Request from client"** (client documents and questionnaire) and **"Check on public registers"** (Companies House, FCA), each with its evidence source (column D).
 - **Cost:** measured per company and shown on the page. Saved answers make sample demos free.
@@ -25,7 +25,7 @@ Goal: the first page is a workspace where the user uploads **every document they
 4. **Evidence mapper** for all 32 checks (Claude) plus merging with the Section 1 rules, with tests. **Done**
 5. **New workspace page:** upload, links, identify and confirm, run, results and request list. **Done**
 6. **Real run** on the fake pack; measure cost; save answers for free demos. **Done** (about $0.09 to identify + $0.20 to map; saved answers replay free)
-7. **FCA register** link, once an FCA API key is set up.
+7. **FCA register:** the user enters the firm reference number (FRN); the firm's details, every page of permissions, requirements, disciplinary history and linked individuals become an "FCA register record" source for Claude (industry and checks). The page shows the firm's name and status straight away and warns if the FCA's Companies House number differs from the company entered. **Done**
 
 ## Notes from building
 
@@ -53,3 +53,5 @@ To connect: industry options become payments and e-money (fintech checklist), cr
 asset management, not a financial business (general), and banking / insurance / other financial (fintech for now,
 flagged as having no specific checklist). Rule for Claude: if it manages funds it is an asset manager, otherwise an
 investment firm.
+- FCA register API: requests need a named User-Agent (its security service blocks Python's default with "error code: 1010"). "Firm not found" comes back as a normal reply with no data. Public register links use an internal ID, not the FRN, so the page asks for the FRN.
+- The sample pack leaves the FCA box empty so its saved answers still replay free; its questionnaire's specimen FRN 999999 is not on the register.
