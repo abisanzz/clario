@@ -1,0 +1,107 @@
+# Clario: KYC document intelligence for UK onboarding
+
+Clario reviews a company's KYC (know your customer) pack the way an onboarding analyst would. You drop in every document you have for a company and add its Companies House number, FCA firm reference number and website. Clario then:
+
+1. **identifies each document** (certificate of incorporation, proof of address, shareholder register and so on);
+2. **works out the industry** from the questionnaire, the official industry codes and the FCA register, and **picks the matching checklist**;
+3. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
+4. lets **an analyst confirm or override** any result, with the reason recorded beside the original answer.
+
+The output is the "request from client" list and the "check on public registers" list an analyst would otherwise build by hand.
+
+![The Clario workspace: the sample pack's documents and links, with the registers checked as you type](docs/screenshots/workspace.png)
+
+## What it catches
+
+The sample pack is a fictitious company, EXAMPLE PAYMENTS LTD, with problems planted on purpose. Clario finds them:
+
+| Planted problem | What Clario reports |
+|---|---|
+| The questionnaire claims FCA authorisation under firm reference number 999999 | **2.1 Unclear:** the FCA register has no firm with that number, so the claim is not supported. Checks 2.2 to 2.4 are **Missing**. |
+| The company number is not on Companies House | **1.3 Unclear:** company not found at Companies House |
+| A shareholder holds 25% in the register but 28% in the questionnaire | **3.2 Unclear**, quoting both documents |
+| No ownership structure chart | **3.1 Missing**, added to the "request from client" list |
+| One director has no identity check | **4.2 Unclear** |
+
+![Results: summary counts, the two gap lists and every check by section](docs/screenshots/results.png)
+
+## How it works
+
+```
+Documents (PDF or photo) ─┐
+Companies House record ───┤  Claude: what is each document?  →  analyst confirms the labels
+FCA register entry ───────┤  Claude: which industry?         →  analyst confirms the industry and checklist
+Company website ──────────┘  Claude: evidence for every check, quoted with document and page
+                                          │
+                     fixed rules re-decide the legal-existence checks (1.1 to 1.4)
+                                          │
+                       results  →  analyst overrides, saved with reason, name and date
+```
+
+- **AI where judgement is needed, rules where it isn't.** Claude reads documents and maps evidence. Deterministic Python rules check the company number format, document dates, the 3-month age limit for proof of address, name matches, and the live Companies House status. Where the rules decide, Claude's view is still shown beside them.
+- **Every finding is traceable.** Each result says who decided it (rules, Claude or a named analyst) and quotes its evidence with document name and page.
+- **Statuses describe the evidence, not the customer.** Present, Missing, Unclear and Needs human review come from the checklist itself. Clario never approves or rejects a client; red flags go to an analyst.
+- **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
+- **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, every permission, requirements, disciplinary history and approved individuals). The page warns straight away if the FCA's record links the firm to a different company number.
+- **Analyst overrides persist.** Each change needs a reason and a reviewer name, keeps the original answer, can be undone, and is saved per case on the analyst's own machine.
+
+## Design choices
+
+- **Structured outputs.** Claude answers in a fixed JSON format, so every reply can be read by code and an unexpected answer falls back safely (for example to "Unclear" or "Other").
+- **Prompt-injection guard.** Uploaded documents and web pages are treated as information to read, never as instructions to follow.
+- **Cost control.** Each Claude call shows its cost on the page. Only the documents that describe the business are sent for the industry question. Answers are saved against a fingerprint of the exact input (documents, labels, links and checklist questions), so a demo replays for free and an answer is never reused for different input.
+- **Privacy.** Uploaded files are sent to Anthropic to be read, so the page says to use only fictitious or approved documents. API keys live only in a git-ignored `.env`, and analyst notes stay in a git-ignored `reviews/` folder.
+
+### Measured cost per company
+
+| Step | Cost |
+|---|---|
+| Identify the documents (8 files) | about $0.09 |
+| Suggest the industry | about $0.03 |
+| Map the evidence to the checklist | about $0.21 |
+| **Total** | **about $0.33 (roughly 26p)** |
+
+Companies House and FCA register lookups are free. The sample pack replays saved answers and costs nothing.
+
+![Analyst review: changing a result with a reason](docs/screenshots/review.png)
+
+## Run it yourself
+
+You need Python 3.12 or later and three free or low-cost keys: a [Companies House API key](https://developer.company-information.service.gov.uk/), an [FCA Register API key](https://register.fca.org.uk/Developer/s/) and an [Anthropic API key](https://console.anthropic.com/).
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env          # then open .env and fill in your keys
+.venv/bin/streamlit run app/main.py
+```
+
+The sample pack needs the Companies House and FCA keys (both free) but no Anthropic key, because Claude's answers for it are saved. To run the tests (they never go online or spend money):
+
+```bash
+.venv/bin/python -m pytest
+```
+
+## Project layout
+
+| Path | What it holds |
+|---|---|
+| `app/main.py` | The Streamlit workspace page |
+| `services/pack.py` | Document identification and evidence mapping for the whole checklist |
+| `services/industry.py` | Industry suggestion and the industry-to-checklist link |
+| `services/validator.py` | The fixed rules for the legal-existence checks |
+| `services/companies_house.py`, `services/fca.py`, `services/website.py` | Live sources |
+| `services/reviews.py` | Analyst overrides, saved per case |
+| `services/extractor.py` | Calls to Claude, saved answers and cost |
+| `docs/*.xlsx` | The six checklists (`scripts/make_industry_checklists.py` builds five of them) |
+| `sample_documents/` | The fictitious sample pack and its saved answers |
+| `data/sic_codes.csv` | Official SIC industry code descriptions |
+| `tests/` | Tests, using fake versions of Claude and the registers |
+
+## Limits
+
+Clario supports a KYC review and does not replace one. It does not run sanctions, PEP or adverse media screening (those checks are left as "Not started" for a screening tool), and it does not make the risk decision. It is not legal advice.
+
+## Built with
+
+Python, [Streamlit](https://streamlit.io), the [Anthropic API](https://docs.anthropic.com) (Claude Opus 5.5), openpyxl, fpdf2 and pytest. Company data comes from the Companies House API and FCA register data from the FCA Financial Services Register API. SIC code descriptions are from Companies House's public list ([api-enumerations](https://github.com/companieshouse/api-enumerations)). Public sector information is licensed under the Open Government Licence v3.0.
