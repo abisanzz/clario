@@ -381,7 +381,7 @@ if st.session_state.get("screen", "details") == "details":
 
 # --- Screens 2 to 5: the checks, using the saved details ---
 
-SCREENS = ["details", "documents", "industry", "checks", "results"]
+SCREENS = ["details", "documents", "industry", "results"]
 screen = st.session_state.screen if st.session_state.get("screen") in SCREENS else "documents"
 
 source = saved["source"]
@@ -538,9 +538,9 @@ if screen == "industry":
     navigation("Next", "industry" in st.session_state, save=lambda: remember(choice=(industry, checklist)))
     if "industry" in st.session_state:
         if source == "Upload documents":
-            st.caption(f"Next runs the KYC checks: Claude reads every document again against the checklist (roughly "
-                       f"3p per document, about ${len(documents) * 0.027:.2f} for these {len(documents)}). A reopened "
-                       "draft with unchanged documents and checklist costs nothing.")
+            st.caption(f"Next runs the KYC checks and shows the results: Claude reads every document again against "
+                       f"the checklist (roughly 3p per document, about ${len(documents) * 0.027:.2f} for these "
+                       f"{len(documents)}). A reopened review with unchanged documents and checklist costs nothing.")
         elif checklist != SAMPLE_CHECKLIST:
             st.caption(":material/payments: The sample's saved answer is for the fintech checklist. With this checklist, "
                        "Next asks Claude to run the checks again (about 20p).")
@@ -556,41 +556,24 @@ suggested_checklist, _ = checklist_for(industry)
 if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
     st.session_state.pop("assessment")
 
-# --- Screen 4: run the checks ---
-
-if screen == "checks":
-    with st.container(border=True):
-        st.subheader(":material/fact_check: Run the KYC checks")
-        st.caption(f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]}.")
-        if "assessment" not in st.session_state:  # run straight away when this screen opens
-            replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
-            sources, _ = fetch_links(company_link, website, fca_frn)
-            with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the checklist. "
-                            "This can take a minute..."):
-                try:
-                    result = assess_pack(
-                        documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
-                        saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack"
-                        else None,
-                    )
-                    st.session_state.assessment = ((confirmed, checklist), result)
-                except ExtractionFailed as error:
-                    st.error(f"Could not run the checks: {error}", icon=":material/error:")
-                    st.button("Try again", icon=":material/refresh:")
-        if "assessment" in st.session_state:
-            original = st.session_state.assessment[1]
-            total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
-            st.success("The checks are done. Click See results to view them.", icon=":material/check_circle:")
-            st.caption("Checks: replayed, $0.00" if original.replayed
-                       else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
-    navigation("See results", "assessment" in st.session_state)
-    st.stop()
+# --- Screen 4: results. The checks run as this screen opens, then the results appear ---
 
 if "assessment" not in st.session_state:
-    go("checks")
+    replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
+    sources, _ = fetch_links(company_link, website, fca_frn)
+    with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the "
+                    f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
+        try:
+            st.session_state.assessment = ((confirmed, checklist), assess_pack(
+                documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
+                saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None,
+            ))
+        except ExtractionFailed as error:
+            st.error(f"Could not run the checks: {error}", icon=":material/error:")
+            st.button("Try again", icon=":material/refresh:")
+            navigation()
+            st.stop()
 original = st.session_state.assessment[1]
-
-# --- Screen 5: results ---
 
 # The analyst's saved changes for this set of documents and checklist
 review_path = case_file(pack_key, checklist)
@@ -605,6 +588,9 @@ st.caption(
     + (", chosen by you instead of the suggested one." if checklist != suggested_checklist else ".")
     + (f" {len(overrides)} result(s) changed by an analyst." if overrides else "")
 )
+total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
+st.caption("Checks: replayed, $0.00" if original.replayed
+           else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
 with st.container(horizontal=True):
     for status, help_text in [
         (Status.PRESENT, "The evidence is there and consistent"),
