@@ -1,12 +1,12 @@
 {
-  "input_sha256": "184800cfcc6ac8bf4c1576a4458ce986f7089171aa60bc3ab113dab1c89ee256",
+  "input_sha256": "9c11f5efa6cf52325206bdddfd560bc6d6c18a7da1887aa725bda1bd5851dcf3",
   "model": "claude-opus-5-5",
   "answer": {
     "checks": [
       {
         "check_id": "1.1",
         "status": "Unclear",
-        "finding": "The certificate of incorporation gives the name, company number, incorporation date and legal form. However, the Companies House search returned no company with number 99999901, so these details cannot be confirmed against the register. This mismatch needs to be resolved before relying on the certificate.",
+        "finding": "The certificate shows the name EXAMPLE PAYMENTS LTD, company number 99999901 and incorporation on 14th March 2019, and the articles, registers and resolution match. However, the Companies House record says no company with that number exists. The certificate cannot be confirmed against the register, which is a significant inconsistency.",
         "evidence": [
           {
             "source_number": 1,
@@ -17,11 +17,6 @@
             "source_number": 1,
             "page": 1,
             "quote": "EXAMPLE PAYMENTS LTD"
-          },
-          {
-            "source_number": 1,
-            "page": 1,
-            "quote": "is this day incorporated under the Companies Act 2006 as a private company, that the company is limited by shares"
           },
           {
             "source_number": 1,
@@ -38,7 +33,7 @@
       {
         "check_id": "1.2",
         "status": "Unclear",
-        "finding": "The proof of address is a recent electricity bill (2 September 2026) addressed to the company at 1 Example Street, London EX1 1AA. This is a supply address and is not confirmed as the registered office: the certificate only says the office is in England and Wales, and there is no Companies House record. The client says it trades from its registered office, so no separate principal place of business is given.",
+        "finding": "An electricity bill dated 2 September 2026 is addressed to the company at 1 Example Street, London EX1 1AA, and the questionnaire says the firm trades from its registered office. Nothing confirms that this address is the registered office: the bill shows it only as the supply address, and Companies House has no record of the company. The certificate gives only 'England and Wales'.",
         "evidence": [
           {
             "source_number": 4,
@@ -64,8 +59,8 @@
       },
       {
         "check_id": "1.3",
-        "status": "Missing",
-        "finding": "There is no Companies House record for company number 99999901. Active status, filed accounts and confirmation statement cannot be evidenced. This is a red flag.",
+        "status": "Unclear",
+        "finding": "Active status, filed accounts and confirmation statement cannot be confirmed because Companies House returns no company with this number.",
         "evidence": [
           {
             "source_number": 9,
@@ -77,7 +72,7 @@
       {
         "check_id": "1.4",
         "status": "Present",
-        "finding": "The articles of association adopt the model articles, give the directors general authority, and set out how documents are executed: two directors, or one director with a witness. The quorum for directors' meetings is two.",
+        "finding": "The articles adopt the model articles. Directors have general authority to manage the company. Documents are executed by two directors, or by one director with an attesting witness. The quorum for directors' meetings is two.",
         "evidence": [
           {
             "source_number": 2,
@@ -99,7 +94,7 @@
       {
         "check_id": "2.1",
         "status": "Unclear",
-        "finding": "The client claims to be an Authorised Payment Institution with FCA firm reference number 999999. The FCA register has no firm with that reference number, so the claim is not supported by the register.",
+        "finding": "The client claims to be an Authorised Payment Institution with FRN 999999. The FCA register has no firm with that reference number, so the claimed authorisation is not verified.",
         "evidence": [
           {
             "source_number": 6,
@@ -116,7 +111,7 @@
       {
         "check_id": "2.2",
         "status": "Missing",
-        "finding": "There is no FCA register entry, so it cannot be confirmed that the firm's permissions cover payment services or safeguarding.",
+        "finding": "No FCA register entry was found, so there is no evidence of permissions covering payment services (card and open-banking collection, safeguarding).",
         "evidence": [
           {
             "source_number": 10,
@@ -127,9 +122,14 @@
       },
       {
         "check_id": "2.3",
-        "status": "Missing",
-        "finding": "There is no FCA register entry. It cannot be determined whether the firm is directly authorised or acts as an agent of another firm, and no principal is identified.",
+        "status": "Unclear",
+        "finding": "The questionnaire implies direct authorisation as an Authorised Payment Institution. This cannot be confirmed because no FCA register entry exists, and it is not established whether the firm is an agent of another firm instead.",
         "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Authorised Payment Institution, FCA firm reference number 999999 (specimen)."
+          },
           {
             "source_number": 10,
             "page": 1,
@@ -140,7 +140,7 @@
       {
         "check_id": "2.4",
         "status": "Missing",
-        "finding": "There is no FCA register entry and no warning list check was provided, so restrictions, warnings or enforcement history cannot be assessed. Claiming authorisation that is not on the register is itself a concern for analyst review.",
+        "finding": "No FCA register entry was found and no FCA warning list check was provided. Restrictions, warnings and enforcement history cannot be assessed.",
         "evidence": [
           {
             "source_number": 10,
@@ -152,7 +152,7 @@
       {
         "check_id": "2.5",
         "status": "Present",
-        "finding": "The questionnaire says the firm holds customer funds and safeguards them in a segregated account with Example Bank plc, reconciled daily.",
+        "finding": "The client holds customer funds and safeguards them in a segregated account with Example Bank plc, reconciled daily.",
         "evidence": [
           {
             "source_number": 6,
@@ -164,7 +164,7 @@
       {
         "check_id": "3.1",
         "status": "Unclear",
-        "finding": "The register of members shows two individuals and Example Ventures Fund I LP (15%). No ownership chart was provided. The ownership of the fund and its natural persons are not traced.",
+        "finding": "The register of members shows Alex Sample (60%), Jamie Example (25%) and Example Ventures Fund I LP (15%). No ownership chart was provided, and the fund's ownership and control are not traced up to natural persons.",
         "evidence": [
           {
             "source_number": 8,
@@ -175,13 +175,23 @@
             "source_number": 8,
             "page": 1,
             "quote": "150,000 15%"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "600,000 60%"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "250,000 25%"
           }
         ]
       },
       {
         "check_id": "3.2",
         "status": "Unclear",
-        "finding": "Alex Sample holds 60% and is clearly a beneficial owner. Jamie Example's holding is inconsistent: the questionnaire says 28% but the register of members shows exactly 25%, which is not more than 25%. Whether Jamie meets the beneficial owner threshold needs to be resolved.",
+        "finding": "Alex Sample at 60% is clearly a beneficial owner. Jamie Example's holding is inconsistent: the questionnaire says 28%, but the register of members says 25% (250,000 shares). Exactly 25% is not 'more than 25%', so whether Jamie is a beneficial owner by shareholding depends on which figure is correct.",
         "evidence": [
           {
             "source_number": 6,
@@ -192,23 +202,18 @@
             "source_number": 8,
             "page": 1,
             "quote": "250,000 25%"
-          },
-          {
-            "source_number": 8,
-            "page": 1,
-            "quote": "600,000 60%"
           }
         ]
       },
       {
         "check_id": "3.4",
         "status": "Unclear",
-        "finding": "No ownership chart or Companies House PSC register is available; the company is not on Companies House. The questionnaire (Jamie 28%) and the register of members (Jamie 25%) disagree. This mismatch is flagged for review.",
+        "finding": "No ownership chart was provided, and no Companies House PSC register is available because the company is not found. The questionnaire (Jamie Example 28%) and the shareholder register (25%) disagree. Flag for review.",
         "evidence": [
           {
             "source_number": 6,
             "page": 1,
-            "quote": "Alex Sample (60%) and Jamie Example (28%)"
+            "quote": "Alex Sample (60%) and Jamie Example (28%)."
           },
           {
             "source_number": 8,
@@ -225,7 +230,7 @@
       {
         "check_id": "3.5",
         "status": "Unclear",
-        "finding": "The fund shareholder is identified with an address care of its manager in Jersey. The fund's own jurisdiction of formation, its general partner and its investors are not documented.",
+        "finding": "One fund is identified, Example Ventures Fund I LP, addressed care of a Jersey manager. The fund's own jurisdiction of formation, its general partner and its investors are not documented, and no structure chart was provided.",
         "evidence": [
           {
             "source_number": 8,
@@ -237,29 +242,44 @@
       {
         "check_id": "4.1",
         "status": "Present",
-        "finding": "The register of directors lists three directors: Alex Sample, Jamie Example and Sam Placeholder. All three signed the board resolution. Note that this cannot be cross-checked against Companies House.",
+        "finding": "The register of directors lists three directors as at 1 September 2026: Alex Sample, Jamie Example and Sam Placeholder. It cannot be cross-checked against Companies House.",
         "evidence": [
           {
             "source_number": 7,
             "page": 1,
-            "quote": "Position as at 1 September 2026."
+            "quote": "Alex Sample 12 April 1985"
           },
           {
-            "source_number": 3,
+            "source_number": 7,
             "page": 1,
-            "quote": "Sam Placeholder (signed)"
+            "quote": "Jamie Example 3 November 1988"
+          },
+          {
+            "source_number": 7,
+            "page": 1,
+            "quote": "Sam Placeholder 21 July 1979"
           }
         ]
       },
       {
         "check_id": "4.2",
-        "status": "Unclear",
-        "finding": "Identity is verified for Alex Sample and Jamie Example, the beneficial owners and account signatories. Sam Placeholder is a director and completed the onboarding questionnaire, but was not submitted for verification.",
+        "status": "Needs human review",
+        "finding": "Alex Sample and Jamie Example, the shareholders and authorised signatories, are verified. Sam Placeholder is not verified, although Sam is a director, the MLRO and the person who completed the questionnaire. An analyst should decide whether Sam's ID is required.",
         "evidence": [
           {
             "source_number": 5,
             "page": 1,
             "quote": "No other individuals were submitted for verification."
+          },
+          {
+            "source_number": 5,
+            "page": 1,
+            "quote": "Alex Sample 12 April 1985"
+          },
+          {
+            "source_number": 5,
+            "page": 1,
+            "quote": "Jamie Example 3 November 1988"
           },
           {
             "source_number": 6,
@@ -271,34 +291,34 @@
       {
         "check_id": "4.3",
         "status": "Present",
-        "finding": "Names and dates of birth for Alex Sample and Jamie Example match between the register of directors and the ID report. Their residential addresses match between the ID report and the register of members. The director service address is the company address. Sam Placeholder's details appear only in the register of directors.",
+        "finding": "Names and dates of birth match across the register of directors and the ID report. Residential addresses in the ID report match the register of members, and the directors' service addresses are the company address. The ownership percentage inconsistency for Jamie Example is covered under 3.2 and 3.4.",
         "evidence": [
           {
             "source_number": 5,
             "page": 1,
-            "quote": "Alex Sample 12 April 1985"
-          },
-          {
-            "source_number": 7,
-            "page": 1,
-            "quote": "Alex Sample 12 April 1985"
+            "quote": "10 Sample Lane, London EX2 2BB"
           },
           {
             "source_number": 8,
             "page": 1,
-            "quote": "22 Example Road,"
+            "quote": "10 Sample Lane, London EX2 2BB"
           },
           {
             "source_number": 5,
             "page": 1,
-            "quote": "Jamie Example 3 November 1988"
+            "quote": "22 Example Road, Manchester EX3 3CC"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "22 Example Road, Manchester EX3 3CC"
           }
         ]
       },
       {
         "check_id": "4.4",
-        "status": "Needs human review",
-        "finding": "The board resolution, signed by all three directors, authorises any two of Alex Sample and Jamie Example to instruct and sign on the accounts. In practice this means both must sign, since only two people are named. Sam Placeholder completed the questionnaire but is not named as an authorised person. The analyst should confirm who is instructing.",
+        "status": "Present",
+        "finding": "A written resolution signed by all three directors authorises any two of Alex Sample and Jamie Example to give instructions and sign on the accounts. This is consistent with the articles' two-director rules.",
         "evidence": [
           {
             "source_number": 3,
@@ -310,7 +330,7 @@
       {
         "check_id": "5.1",
         "status": "Present",
-        "finding": "The business model, customer types and countries served (UK and Ireland) are described.",
+        "finding": "Business model, product, customer types and countries are described.",
         "evidence": [
           {
             "source_number": 6,
@@ -322,7 +342,7 @@
       {
         "check_id": "5.2",
         "status": "Present",
-        "finding": "The purpose of the account and the expected volumes and values are given.",
+        "finding": "The purpose of the account and expected volumes and values are stated.",
         "evidence": [
           {
             "source_number": 6,
@@ -333,8 +353,8 @@
       },
       {
         "check_id": "5.3",
-        "status": "Unclear",
-        "finding": "Source of funds is stated as a seed funding round and fee revenue. No supporting evidence was provided, such as investment agreements or bank statements.",
+        "status": "Present",
+        "finding": "The questionnaire states the source of funds: a GBP 2 million seed round in 2024 and fee revenue. No supporting evidence, such as investment agreements or bank statements, was provided.",
         "evidence": [
           {
             "source_number": 6,
@@ -346,7 +366,7 @@
       {
         "check_id": "5.4",
         "status": "Present",
-        "finding": "The questionnaire names the MLRO, lists approved policies and gives the date and outcome of the last independent AML audit.",
+        "finding": "The questionnaire names an MLRO, lists board-approved policies and reports an independent AML audit in March 2026.",
         "evidence": [
           {
             "source_number": 6,
@@ -382,11 +402,6 @@
         "source_number": 1,
         "page": 1,
         "iso_date": "2019-03-14"
-      },
-      "certificate_legal_form": {
-        "value": "PRIVATE LIMITED COMPANY",
-        "source_number": 1,
-        "page": 1
       },
       "proof_of_address_company_name": {
         "value": "EXAMPLE PAYMENTS LTD",

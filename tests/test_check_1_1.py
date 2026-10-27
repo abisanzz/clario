@@ -16,7 +16,6 @@ def certificate(**changes):
         company_name=Fact("EXAMPLE PAYMENTS LTD", PAGE_1),
         company_number=Fact("12345678", PAGE_1),
         incorporation_date=Fact(date(2019, 3, 14), PAGE_1),
-        legal_form=Fact("private limited company", PAGE_1),
     )
     return replace(good, **changes)
 
@@ -26,8 +25,7 @@ def test_complete_certificate_is_present():
     assert result.check_id == "1.1"
     assert result.status is Status.PRESENT
     assert result.finding == (
-        "Name 'EXAMPLE PAYMENTS LTD', number 12345678, "
-        "incorporated 14 Mar 2019, legal form 'private limited company'"
+        "Name 'EXAMPLE PAYMENTS LTD', number 12345678, incorporated 14 Mar 2019"
     )
     assert result.source_reference == PAGE_1
 
@@ -42,7 +40,6 @@ def test_no_certificate_is_missing():
     ("company_name", "company name"),
     ("company_number", "company number"),
     ("incorporation_date", "incorporation date"),
-    ("legal_form", "legal form"),
 ])
 @pytest.mark.parametrize("empty", [None, "", "   "])
 def test_each_missing_fact_is_reported(field, label, empty):
@@ -52,8 +49,8 @@ def test_each_missing_fact_is_reported(field, label, empty):
 
 
 def test_several_missing_facts_are_all_listed():
-    result = check_1_1(certificate(company_number=Fact(), legal_form=Fact()), today=TODAY)
-    assert result.finding == "Not found on certificate: company number, legal form"
+    result = check_1_1(certificate(company_number=Fact(), incorporation_date=Fact()), today=TODAY)
+    assert result.finding == "Not found on certificate: company number, incorporation date"
 
 
 @pytest.mark.parametrize("number", ["12345678", "SC123456", "sc 123 456", "OC000001", "00445790"])
@@ -95,20 +92,15 @@ def test_unreadable_date_is_unclear():
 
 def test_missing_wins_over_unclear_but_both_are_reported():
     result = check_1_1(
-        certificate(legal_form=Fact(), company_number=Fact("445790", PAGE_1)), today=TODAY
+        certificate(company_name=Fact(), company_number=Fact("445790", PAGE_1)), today=TODAY
     )
     assert result.status is Status.MISSING
-    assert result.finding.startswith("Not found on certificate: legal form. Also: company number '445790'")
-
-
-@pytest.mark.parametrize("legal_form", ["limited liability partnership", "public limited company"])
-def test_any_recorded_legal_form_is_accepted(legal_form):
-    assert check_1_1(certificate(legal_form=Fact(legal_form, PAGE_1)), today=TODAY).status is Status.PRESENT
+    assert result.finding.startswith("Not found on certificate: company name. Also: company number '445790'")
 
 
 def test_sources_from_different_pages_are_all_listed():
     result = check_1_1(
-        certificate(legal_form=Fact("private limited company", "Certificate of incorporation p.2")),
+        certificate(incorporation_date=Fact(date(2019, 3, 14), "Certificate of incorporation p.2")),
         today=TODAY,
     )
     assert result.source_reference == "Certificate of incorporation p.1; Certificate of incorporation p.2"

@@ -21,7 +21,6 @@ def answer(**changes):
         "company_name": {"value": "EXAMPLE PAYMENTS LTD", "page": 1},
         "company_number": {"value": "12345678", "page": 1},
         "incorporation_date": {"value": "14th March 2019", "iso_date": "2019-03-14", "page": 1},
-        "legal_form": {"value": "private company limited by shares", "page": 1},
     }
     return {**good, **changes}
 
@@ -38,7 +37,6 @@ def test_answer_becomes_certificate_facts():
     assert certificate.company_name == Fact("EXAMPLE PAYMENTS LTD", SOURCE)
     assert certificate.company_number == Fact("12345678", SOURCE)
     assert certificate.incorporation_date == Fact(date(2019, 3, 14), SOURCE)
-    assert certificate.legal_form == Fact("private company limited by shares", SOURCE)
 
 
 def test_unreadable_date_keeps_printed_text():
@@ -67,8 +65,8 @@ def test_number_is_passed_on_exactly_as_printed():
 
 
 def test_page_numbers_come_from_the_answer():
-    reply = answer(legal_form={"value": "private company limited by shares", "page": 2})
-    assert extract_certificate(SAMPLE, client=FakeClaude(reply)).legal_form.source == "Certificate of incorporation p.2"
+    reply = answer(company_name={"value": "EXAMPLE PAYMENTS LTD", "page": 2})
+    assert extract_certificate(SAMPLE, client=FakeClaude(reply)).company_name.source == "Certificate of incorporation p.2"
 
 
 # --- What is sent to Claude ---

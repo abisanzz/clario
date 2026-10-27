@@ -1,11 +1,12 @@
 # Clario: KYC document intelligence for UK onboarding
 
-Clario reviews a company's KYC (know your customer) pack the way an onboarding analyst would. You drop in every document you have for a company and add its Companies House number, FCA firm reference number and website. Clario then:
+Clario reviews a company's KYC (know your customer) pack the way an onboarding analyst would. You drop in every document you have for a company and add its full legal name, Companies House number, FCA firm reference number and website. Clario then:
 
-1. **identifies each document** (certificate of incorporation, proof of address, shareholder register and so on);
-2. **works out the industry** from the questionnaire, the official industry codes and the FCA register, and **picks the matching checklist**;
-3. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
-4. lets **an analyst confirm or override** any result, with the reason recorded beside the original answer.
+1. **checks the legal entity name** against Companies House;
+2. **identifies each document** (certificate of incorporation, proof of address, shareholder register and so on);
+3. **works out the industry** from the questionnaire, the official industry codes and the FCA register, and **picks the matching checklist**;
+4. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
+5. lets **an analyst confirm or override** any result, with the reason recorded beside the original answer.
 
 The output is the "request from client" list and the "check on public registers" list an analyst would otherwise build by hand.
 
@@ -17,11 +18,11 @@ The sample pack is a fictitious company, EXAMPLE PAYMENTS LTD, with problems pla
 
 | Planted problem | What Clario reports |
 |---|---|
-| The questionnaire claims FCA authorisation under firm reference number 999999 | **2.1 Unclear:** the FCA register has no firm with that number, so the claim is not supported. Checks 2.2 to 2.4 are **Missing**. |
+| The questionnaire claims FCA authorisation under firm reference number 999999 | **2.1 Unclear:** the FCA register has no firm with that number, so the claim is not supported. Permissions (2.2) and enforcement history (2.4) are **Missing**. |
 | The company number is not on Companies House | **1.3 Unclear:** company not found at Companies House |
 | A shareholder holds 25% in the register but 28% in the questionnaire | **3.2 Unclear**, quoting both documents |
 | No ownership structure chart | **3.1 Missing**, added to the "request from client" list |
-| One director has no identity check | **4.2 Unclear** |
+| One director has no identity check | **4.2 Needs human review** |
 
 ![Results: summary counts, the two gap lists and every check by section](docs/screenshots/results.png)
 
@@ -38,7 +39,7 @@ Company website ──────────┘  Claude: evidence for every ch
                        results  →  analyst overrides, saved with reason, name and date
 ```
 
-- **AI where judgement is needed, rules where it isn't.** Claude reads documents and maps evidence. Deterministic Python rules check the company number format, document dates, the 3-month age limit for proof of address, name matches, and the live Companies House status. Where the rules decide, Claude's view is still shown beside them.
+- **AI where judgement is needed, rules where it isn't.** Claude reads documents and maps evidence. Deterministic Python rules check the legal entity name against Companies House, the company number format, document dates, the 3-month age limit for proof of address, name matches, and the live Companies House status. Where the rules decide, Claude's view is still shown beside them.
 - **Every finding is traceable.** Each result says who decided it (rules, Claude or a named analyst) and quotes its evidence with document name and page.
 - **Statuses describe the evidence, not the customer.** Present, Missing, Unclear and Needs human review come from the checklist itself. Clario never approves or rejects a client; red flags go to an analyst.
 - **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
@@ -86,7 +87,9 @@ The sample pack needs the Companies House and FCA keys (both free) but no Anthro
 
 | Path | What it holds |
 |---|---|
-| `app/main.py` | The Streamlit workspace page |
+| `app/main.py` | Starts the app and shows the menu |
+| `app/app_pages/home.py` | The landing page: what Clario does and what you get |
+| `app/app_pages/review.py` | The review page: entity details, documents, checks and results |
 | `services/pack.py` | Document identification and evidence mapping for the whole checklist |
 | `services/industry.py` | Industry suggestion and the industry-to-checklist link |
 | `services/validator.py` | The fixed rules for the legal-existence checks |

@@ -3,7 +3,7 @@
   "model": "claude-opus-5-5",
   "answer": {
     "industry": "payments",
-    "reason": "The questionnaire describes a payments app for small businesses to collect card and open-banking payments, and claims Authorised Payment Institution status with safeguarded customer funds. However, neither the Companies House record nor the FCA register could find the company or firm reference 999999, so the claimed registration and authorisation are unverified. This is a serious warning sign the analyst must investigate.",
+    "reason": "The questionnaire describes a payments app for small UK and Irish businesses to collect card and open-banking payments, and claims Authorised Payment Institution status with safeguarded customer funds. However, neither the company number nor FCA reference 999999 could be found on the Companies House or FCA registers, so the claimed regulatory status and existence are unverified and the analyst must investigate. The document is also marked as a specimen.",
     "sources_agree": "one source",
     "disagreement": "",
     "evidence": [

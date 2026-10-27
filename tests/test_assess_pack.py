@@ -46,7 +46,6 @@ FACTS = {
     "certificate_company_name": fact("EXAMPLE PAYMENTS LTD"),
     "certificate_company_number": fact("99999901"),
     "certificate_incorporation_date": fact("14th March 2019", iso="2019-03-14", dated=True),
-    "certificate_legal_form": fact("PRIVATE LIMITED COMPANY"),
     "proof_of_address_company_name": fact("EXAMPLE PAYMENTS LTD", source=2),
     "proof_of_address_registered_office": fact("1 Example Street, London EX1 1AA", source=2),
     "proof_of_address_date": fact("2 September 2026", source=2, iso="2026-09-02", dated=True),
@@ -284,3 +283,36 @@ def test_fca_source_rejects_text_without_a_reference_number():
     from services.pack import fca_source
     with pytest.raises(ValueError, match="not an FCA firm reference number"):
         fca_source("monzo")
+
+
+def test_entity_name_that_matches_keeps_1_1_present():
+    from services.pack import apply_entity_name
+    result, _ = run()
+    named = apply_entity_name(result, "Example Payments Limited", "99999901", lookup=active_company)
+    o = outcome(named, "1.1")
+    assert o.status is Status.PRESENT
+    assert o.finding.endswith("Legal entity name entered matches Companies House (EXAMPLE PAYMENTS LIMITED)")
+    assert outcome(result, "1.1").status is Status.PRESENT  # the original results are not changed
+
+
+def test_entity_name_that_differs_makes_1_1_unclear_and_a_register_gap():
+    from services.pack import apply_entity_name
+    result, _ = run()
+    named = apply_entity_name(result, "Example Payments Group Ltd", "99999901", lookup=active_company)
+    o = outcome(named, "1.1")
+    assert o.status is Status.UNCLEAR
+    assert "does not match Companies House (EXAMPLE PAYMENTS LIMITED)" in o.finding
+    assert o.decided_by == "Rules"
+    assert "1.1" in [g.check.id for g in named.request_from_client() + named.check_on_registers()]
+
+
+def test_entity_name_not_compared_leaves_the_status_alone():
+    from services.pack import apply_entity_name
+
+    def not_found(number):
+        raise CompanyNotFound(number)
+    result, _ = run()
+    named = apply_entity_name(result, "Anything Ltd", "99999901", lookup=not_found)
+    assert outcome(named, "1.1").status is Status.PRESENT
+    assert "not compared" in outcome(named, "1.1").finding
+    assert apply_entity_name(result, "  ", "99999901") is result  # nothing entered, nothing changed

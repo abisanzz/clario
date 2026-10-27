@@ -29,7 +29,7 @@ def test_check_1_1_is_read_correctly():
     assert check == Check(
         id="1.1",
         section="1. Legal existence",
-        check="Registered name, company number, incorporation date and legal form",
+        check="Registered name, company number and incorporation date",
         evidence_source="Certificate of incorporation; Companies House",
         evidence_type="Client document",
     )

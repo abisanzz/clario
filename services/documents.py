@@ -21,7 +21,6 @@ class CertificateOfIncorporation:
     company_name: Fact = field(default_factory=Fact)
     company_number: Fact = field(default_factory=Fact)
     incorporation_date: Fact = field(default_factory=Fact)
-    legal_form: Fact = field(default_factory=Fact)
 
 
 @dataclass(frozen=True)

@@ -51,9 +51,8 @@ CERTIFICATE_SCHEMA = {
         "company_name": _FACT,
         "company_number": _FACT,
         "incorporation_date": _DATE_FACT,
-        "legal_form": _FACT,
     },
-    "required": ["company_name", "company_number", "incorporation_date", "legal_form"],
+    "required": ["company_name", "company_number", "incorporation_date"],
     "additionalProperties": False,
 }
 
@@ -175,8 +174,7 @@ def make_client():
 
 CERTIFICATE_REQUEST = (
     "This should be a UK certificate of incorporation. Report the registered company name, "
-    "company number, incorporation date and legal form (the type of company, e.g. "
-    "'private company limited by shares')."
+    "company number and incorporation date."
 )
 
 
@@ -186,7 +184,6 @@ def _certificate_from_answer(raw: dict) -> CertificateOfIncorporation:
         company_name=_fact(raw["company_name"], document),
         company_number=_fact(raw["company_number"], document),
         incorporation_date=_date_fact(raw["incorporation_date"], document),
-        legal_form=_fact(raw["legal_form"], document),
     )
 
 

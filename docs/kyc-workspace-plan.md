@@ -31,7 +31,7 @@ Goal: the first page is a workspace where the user uploads **every document they
 
 - The answer format for the mapping call avoids "can be empty" fields: the API allows at most 16 of them.
 - Prompt caching does not carry over from identifying to mapping (different effort settings), so it is not used yet.
-- To tidy: the certificate's legal form was copied as a sentence fragment; tighten the instruction at the next paid re-run.
+- Legal form was removed from check 1.1 (26 Oct 2026, at the user's request) in all six checklists, the extraction and the rules; this also settles the earlier problem of it being copied as a sentence fragment.
 
 ## Industry-specific checklists (next)
 
@@ -55,3 +55,8 @@ flagged as having no specific checklist). Rule for Claude: if it manages funds i
 investment firm.
 - FCA register API: requests need a named User-Agent (its security service blocks Python's default with "error code: 1010"). "Firm not found" comes back as a normal reply with no data. Public register links use an internal ID, not the FRN, so the page asks for the FRN.
 - The sample pack fills in its questionnaire's specimen FRN 999999, which is not on the register, so the demo shows Claude catching a claimed licence the register does not support (2.1 Unclear, 2.2-2.4 Missing). Its saved answers were re-made with the FCA record for $0.24 and replay free.
+
+## Version 1 roadmap
+
+1. **Finalise the document reviewer** (in progress): landing page, entity details, name check, checklists, review page polish.
+2. **Risk rating (last part of version 1):** suggest a rating for checklist 7.1 (customer, product, geography, delivery channel) from the evidence Clario already collects, flag enhanced due diligence triggers (7.2), and let the analyst confirm or change it with a reason; record senior approval for high-risk cases (7.3). Needs a scoring method (the firm's own, or a draft for compliance review). When it ships, update the landing page, which currently says Clario does not rate risk.

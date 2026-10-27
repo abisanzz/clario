@@ -1,7 +1,7 @@
 """A company's KYC pack: the uploaded documents, what each one is, and what the pack shows."""
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -23,7 +23,15 @@ from services.extractor import (
     saved_or_ask,
     tokens,
 )
-from services.validator import CheckResult, Status, check_1_1, check_1_2, check_1_3, check_1_4
+from services.validator import (
+    CheckResult,
+    Status,
+    check_1_1,
+    check_1_2,
+    check_1_3,
+    check_1_4,
+    entity_name_rule,
+)
 
 SUPPORTED_TYPES = {"application/pdf"} | IMAGE_TYPES
 
@@ -206,7 +214,6 @@ FACTS_SCHEMA = _object({
     "certificate_company_name": _fact_schema(),
     "certificate_company_number": _fact_schema(),
     "certificate_incorporation_date": _fact_schema(dated=True),
-    "certificate_legal_form": _fact_schema(),
     "proof_of_address_company_name": _fact_schema(),
     "proof_of_address_registered_office": _fact_schema(),
     "proof_of_address_date": _fact_schema(dated=True),
@@ -217,7 +224,7 @@ FACTS_SCHEMA = _object({
 })
 
 FACT_GUIDE = """Facts to extract (copy exactly as printed; use "" if not found, and 0 for an unknown source_number or page):
-- certificate_*: from the certificate of incorporation (name, company number, incorporation date, legal form).
+- certificate_*: from the certificate of incorporation (name, company number, incorporation date).
 - proof_of_address_*: from the proof of registered address (company name it is addressed to, the registered office address, the document's date).
 - trades_from_registered_office: from the onboarding questionnaire, "yes" if the client says it trades from its registered office, "no" if elsewhere, "not answered" otherwise.
 - principal_place_of_business: the other address, only if the client trades elsewhere.
@@ -313,6 +320,21 @@ class PackAssessment:
         return self._gaps({"Public register"})
 
 
+def apply_entity_name(assessment: PackAssessment, entered: str, company_number: str | None,
+                      lookup=None) -> PackAssessment:
+    """Add the legal entity name rule to check 1.1: a name that does not match Companies House makes it Unclear."""
+    if not entered.strip():
+        return assessment
+    matches, note = entity_name_rule(entered, company_number, **({"lookup": lookup} if lookup else {}))
+    outcomes = []
+    for outcome in assessment.outcomes:
+        if outcome.check.id == "1.1":
+            status = Status.UNCLEAR if matches is False and outcome.status is Status.PRESENT else outcome.status
+            outcome = replace(outcome, status=status, finding=f"{outcome.finding.rstrip('.')}. {note}")
+        outcomes.append(outcome)
+    return replace(assessment, outcomes=outcomes)
+
+
 def _source_names(documents, sources) -> list[str]:
     return [d.name for d in documents] + [s.name for s in sources]
 
@@ -402,7 +424,7 @@ def assess_pack(
     types = {label.document_type for label in labels}
     certificate = CertificateOfIncorporation(
         fact("certificate_company_name"), fact("certificate_company_number"),
-        fact("certificate_incorporation_date"), fact("certificate_legal_form"),
+        fact("certificate_incorporation_date"),
     ) if _present(types, "certificate_of_incorporation") else None
     proof = ProofOfAddress(
         fact("proof_of_address_company_name"), fact("proof_of_address_registered_office"), fact("proof_of_address_date"),

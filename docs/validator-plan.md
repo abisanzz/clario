@@ -15,11 +15,10 @@ First version covers Section 1 (Legal existence) only.
 
 ## Section 1 rules
 
-**1.1 Registered name, company number, incorporation date, legal form** (certificate of incorporation)
+**1.1 Registered name, company number and incorporation date** (certificate of incorporation; legal form removed 26 Oct 2026)
 - Present: all four found and valid.
 - Missing: any of the four not found.
 - Unclear: company number in the wrong format (8 characters, e.g. `12345678` or `SC123456`), or incorporation date in the future or unreadable.
-- Any recorded legal form is accepted (whether it is acceptable is a separate business decision).
 
 **1.2 Registered office and principal place of business, if different** (proof of address; onboarding questionnaire)
 - Present: registered office found; questionnaire says the client trades from it, or gives the other address.

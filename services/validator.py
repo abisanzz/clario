@@ -53,7 +53,7 @@ def _format_date(value: date) -> str:
 
 
 def check_1_1(certificate: CertificateOfIncorporation | None, today: date | None = None) -> CheckResult:
-    """Registered name, company number, incorporation date and legal form."""
+    """Registered name, company number and incorporation date."""
     if certificate is None:
         return CheckResult("1.1", Status.MISSING, "No certificate of incorporation provided")
 
@@ -62,7 +62,6 @@ def check_1_1(certificate: CertificateOfIncorporation | None, today: date | None
         "company name": certificate.company_name,
         "company number": certificate.company_number,
         "incorporation date": certificate.incorporation_date,
-        "legal form": certificate.legal_form,
     }
     missing = [name for name, fact in facts.items() if fact.value is None or str(fact.value).strip() == ""]
     unclear = []
@@ -97,7 +96,7 @@ def check_1_1(certificate: CertificateOfIncorporation | None, today: date | None
 
     finding = (
         f"Name '{certificate.company_name.value}', number {number}, "
-        f"incorporated {_format_date(incorporated)}, legal form '{certificate.legal_form.value}'"
+        f"incorporated {_format_date(incorporated)}"
     )
     return CheckResult("1.1", Status.PRESENT, finding, source_reference)
 
@@ -122,6 +121,34 @@ def _normalise_company_name(name: str) -> str:
 def _same_company_name(a: str, b: str) -> bool:
     """True if two names differ only in capitals, punctuation, spacing, or LIMITED/LTD and PLC wording."""
     return _normalise_company_name(a) == _normalise_company_name(b)
+
+
+def entity_name_matches(entered: str, registered: str) -> bool:
+    """True if the legal entity name the user entered is the registered name, allowing for capitals, punctuation,
+    spacing and LIMITED/LTD or PLC wording."""
+    return bool(entered.strip()) and _same_company_name(entered, registered)
+
+
+def entity_name_rule(
+    entered: str, company_number: str | None, lookup: Callable[[str], dict] = get_company,
+) -> tuple[bool | None, str]:
+    """Compare the legal entity name the user entered with the name registered at Companies House.
+
+    Returns (True if it matches, False if not, None if it could not be compared) and a note for check 1.1.
+    """
+    entered = " ".join(entered.split())
+    number = re.sub(r"\s", "", company_number or "").upper()
+    if not number:
+        return None, f"Legal entity name entered ({entered}) not compared: no company number"
+    try:
+        registered = lookup(number).get("company_name") or ""
+    except CompanyNotFound:
+        return None, f"Legal entity name entered ({entered}) not compared: company {number} is not on Companies House"
+    except LookupFailed as error:
+        return None, f"Legal entity name entered ({entered}) not compared: Companies House lookup failed ({error})"
+    if entity_name_matches(entered, registered):
+        return True, f"Legal entity name entered matches Companies House ({registered})"
+    return False, f"Legal entity name entered ({entered}) does not match Companies House ({registered})"
 
 
 def check_1_2(
