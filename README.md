@@ -44,6 +44,7 @@ Company website ──────────┘  Claude: evidence for every ch
 - **Statuses describe the evidence, not the customer.** Present, Missing, Unclear and Needs human review come from the checklist itself. Clario never approves or rejects a client; red flags go to an analyst.
 - **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
 - **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, every permission, requirements, disciplinary history and approved individuals). The page warns straight away if the FCA's record links the firm to a different company number.
+- **Drafts.** A review can be saved as a draft and continued later: add or remove documents, edit details, and pick up where you left off. Claude's answers are kept with the draft, so reopening it costs nothing.
 - **Analyst overrides persist.** Each change needs a reason and a reviewer name, keeps the original answer, can be undone, and is saved per case on the analyst's own machine.
 
 ## Design choices
@@ -51,7 +52,7 @@ Company website ──────────┘  Claude: evidence for every ch
 - **Structured outputs.** Claude answers in a fixed JSON format, so every reply can be read by code and an unexpected answer falls back safely (for example to "Unclear" or "Other").
 - **Prompt-injection guard.** Uploaded documents and web pages are treated as information to read, never as instructions to follow.
 - **Cost control.** Each Claude call shows its cost on the page. Only the documents that describe the business are sent for the industry question. Answers are saved against a fingerprint of the exact input (documents, labels, links and checklist questions), so a demo replays for free and an answer is never reused for different input.
-- **Privacy.** Uploaded files are sent to Anthropic to be read, so the page says to use only fictitious or approved documents. API keys live only in a git-ignored `.env`, and analyst notes stay in a git-ignored `reviews/` folder.
+- **Privacy.** Uploaded files are sent to Anthropic to be read, so the page says to use only fictitious or approved documents. API keys live only in a git-ignored `.env`, and analyst notes and drafts stay in the git-ignored `reviews/` and `cases/` folders.
 
 ### Measured cost per company
 
@@ -95,6 +96,7 @@ The sample pack needs the Companies House and FCA keys (both free) but no Anthro
 | `services/validator.py` | The fixed rules for the legal-existence checks |
 | `services/companies_house.py`, `services/fca.py`, `services/website.py` | Live sources |
 | `services/reviews.py` | Analyst overrides, saved per case |
+| `services/cases.py` | Draft reviews: details, documents and saved answers |
 | `services/extractor.py` | Calls to Claude, saved answers and cost |
 | `docs/*.xlsx` | The six checklists (`scripts/make_industry_checklists.py` builds five of them) |
 | `sample_documents/` | The fictitious sample pack and its saved answers |

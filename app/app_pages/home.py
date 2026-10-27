@@ -111,8 +111,10 @@ with right.container(border=True):
 with st.container(border=True):
     st.markdown("**:material/lock: How your information is handled**")
     st.markdown(
-        "- Uploaded documents are sent to Anthropic's API so Claude can read them. Clario does not save uploaded "
-        "files; they are held only while your review session is open.\n"
+        "- Uploaded documents are sent to Anthropic's API so Claude can read them.\n"
+        "- When you save a review as a draft (or click Next), its details and documents are saved on the computer "
+        "running Clario, so you can come back to add documents or edit details. Otherwise they are held only while "
+        "your review session is open.\n"
         "- The company number and FCA firm reference number you enter are looked up on the public Companies House "
         "and FCA registers.\n"
         "- A reviewer's changes to results are saved only on the computer running Clario."

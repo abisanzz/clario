@@ -20,3 +20,6 @@ uploads/
 
 # Analysts' changes to results (case notes stay on this computer)
 reviews/
+
+# Draft reviews: entity details and client documents (stay on this computer)
+cases/

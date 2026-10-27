@@ -22,6 +22,15 @@ from services.companies_house import (  # noqa: E402
 )
 from services.extractor import ExtractionFailed  # noqa: E402
 from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
+from services.cases import (  # noqa: E402
+    answer_paths,
+    list_cases,
+    load_case,
+    load_progress,
+    new_case_id,
+    save_case,
+    save_progress,
+)
 from services.checklist import CHECKLISTS  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
@@ -43,6 +52,7 @@ from services.website import WebsiteFetchFailed, website_text  # noqa: E402
 
 SAMPLES = PROJECT_ROOT / "sample_documents"
 SAMPLE_FILES = [SAMPLES / "certificate_of_incorporation.pdf"] + sorted((SAMPLES / "pack").glob("*.pdf"))
+SAMPLE_DOCUMENTS = [UploadedDocument(f.name, f.read_bytes()) for f in SAMPLE_FILES]
 SAMPLE_ANSWERS = {
     "labels": SAMPLES / "pack_labels.answer.json",
     "industry": SAMPLES / "pack_industry.answer.json",
@@ -193,197 +203,363 @@ st.html("""<style>
 [data-testid="stWidgetLabel"] > div { flex: 0 0 auto; justify-content: flex-start; margin-left: 0.4rem; }
 </style>""")
 st.title("Clario KYC workspace")
+st.markdown(
+    "Provide the details of the legal entity you are reviewing and upload the documents you hold for it. Clario uses "
+    "them to establish the entity's identity, check it against Companies House and the FCA register, understand its "
+    "ownership and structure, and map the evidence to the KYC checklist for its industry."
+)
 st.caption(
-    "Add everything you have for a company. Claude identifies each document, suggests the industry, and maps the evidence to "
-    "every item of the matching KYC checklist; fixed rules and the live Companies House and FCA registers back it up. "
-    "Every result says why, and where it came from."
+    "Make sure the details match the entity's official records. Where information is missing or inconsistent, Clario "
+    "lists what to request from the client and what to check on public registers. Every finding shows where it came "
+    "from, for you to validate."
 )
 
-# --- 1. Documents and links ---
+# --- Screen 1: Legal Entity Information ---
+# Streamlit forgets the contents of fields that are not on screen, so "Next" saves them for the session
 
-with st.container(border=True):
-    st.subheader(":material/upload_file: Legal Entity Information")
-    # The documents choice sits below the fields but decides what they are filled with, so read its last setting
-    source = st.session_state.get("source") or "Sample pack"
+saved = st.session_state.get("entity", {})
 
-    entity_name = st.text_input(
-        "Legal Entity Full Name",
-        value=SAMPLE_ENTITY_NAME if source == "Sample pack" else "",
-        key=f"entity_name_{source}",
-        help="Enter the full registered legal name of the entity you are conducting business with.",
-    )
-    company_link = st.text_input(
-        "Companies House Link or Company Number",
-        value=SAMPLE_COMPANY_NUMBER if source == "Sample pack" else "",
-        key=f"company_link_{source}",
-        placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
-        help="Enter a link to the company’s Companies House record or its company registration number. "
-             "We’ll use this to find the company’s details on Companies House.",
-    )
-    show_industry(company_link)
-    show_entity_name_check(entity_name, company_link)
-    website = st.text_input("Company website", key=f"website_{source}", placeholder="e.g. example.com")
-    fca_frn = st.text_input(
-        "FCA firm reference number", key=f"fca_{source}", placeholder="e.g. 730427",
-        value=SAMPLE_FCA_FRN if source == "Sample pack" else "",
-        help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
-    )
-    show_fca_firm(fca_frn, company_link)
 
-    source = st.segmented_control(
-        "Documents", ["Sample pack", "Upload documents"], default="Sample pack", key="source"
-    ) or "Sample pack"
-    if source == "Sample pack":
-        documents = [UploadedDocument(f.name, f.read_bytes()) for f in SAMPLE_FILES]
-        saved_answers = SAMPLE_ANSWERS
-        st.caption(
-            f"{len(documents)} specimen documents for the fictitious EXAMPLE PAYMENTS LTD, with deliberate gaps. "
-            "Saved answers are replayed, so the sample costs nothing to run."
+def remembered(field: str, sample_value: str, source: str) -> str:
+    """What to show in a field: what was entered before for this choice of documents, else the sample's value."""
+    if saved.get("source") == source:
+        return saved.get(field, "")
+    return sample_value if source == "Sample pack" else ""
+
+
+WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "source")
+
+
+def start_over(entity: dict, case_id: str | None) -> None:
+    """Load a draft (or nothing, for a new review): forget the fields' contents and any earlier results."""
+    for key in [k for k in st.session_state if str(k).startswith(WIDGET_PREFIXES)]:
+        del st.session_state[key]
+    for key in ("identification", "labels", "industry", "choice", "assessment", "pack_key"):
+        st.session_state.pop(key, None)
+    st.session_state.entity, st.session_state.case_id, st.session_state.screen = entity, case_id, "details"
+
+
+def save_draft(details: dict, documents: list[UploadedDocument]) -> None:
+    """Save the review as a draft on this computer, starting a new draft the first time."""
+    case_id = st.session_state.get("case_id") or new_case_id()
+    stored = documents if details["source"] == "Upload documents" else []  # the sample's files stay where they are
+    save_case(case_id, details, stored)
+    st.session_state.case_id = case_id
+    st.session_state.entity = {**details, "documents": stored}
+
+
+def draft_label(draft: dict) -> str:
+    saved_at = draft["saved_at"].replace("T", " ")[:16]
+    return (f"{draft['entity_name'] or 'Unnamed entity'} · {draft['documents']} documents · saved {saved_at}")
+
+
+if st.session_state.get("screen", "details") == "details":
+    drafts = list_cases()
+    if drafts or st.session_state.get("case_id"):
+        with st.container(border=True):
+            st.subheader(":material/drafts: Saved drafts")
+            if st.session_state.get("case_id"):
+                st.caption(f"You are working on a saved draft: {saved.get('entity_name') or 'Unnamed entity'}.")
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                by_id = {d["id"]: d for d in drafts}
+                chosen = st.selectbox("Continue a saved review", list(by_id), format_func=lambda i: draft_label(by_id[i]),
+                                      index=None, placeholder="Choose a draft", width="stretch") if drafts else None
+                if st.button("Open draft", icon=":material/folder_open:", disabled=not chosen):
+                    details, stored = load_case(chosen)
+                    start_over({**details, "documents": stored}, chosen)
+                    progress = load_progress(chosen)  # label corrections and industry choice, if saved
+                    if progress:
+                        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"])
+                        if progress["choice"]:
+                            st.session_state.choice = progress["choice"]
+                    st.rerun()
+                if st.button("Start a new review", icon=":material/add:"):
+                    start_over({}, None)
+                    st.rerun()
+
+    with st.container(border=True):
+        st.subheader(":material/upload_file: Legal Entity Information")
+        # The documents choice sits below the fields but decides what they are filled with, so read its last setting
+        source = st.session_state.get("source") or saved.get("source") or "Sample pack"
+
+        entity_name = st.text_input(
+            "Legal Entity Full Name",
+            value=remembered("entity_name", SAMPLE_ENTITY_NAME, source),
+            key=f"entity_name_{source}",
+            help="Enter the full registered legal name of the entity you are conducting business with.",
         )
-        st.pills("Files", [d.name for d in documents], disabled=True, label_visibility="collapsed")
-    else:
-        uploads = st.file_uploader("Company documents (PDFs or photos)", type=UPLOAD_TYPES, accept_multiple_files=True)
-        documents = [UploadedDocument(u.name, u.getvalue(), u.type or "application/pdf") for u in uploads or []]
-        saved_answers = {}
-        st.caption(":material/lock: Only upload fictitious or approved documents: files are sent to Anthropic to be read.")
+        company_link = st.text_input(
+            "Companies House Link or Company Number",
+            value=remembered("company_link", SAMPLE_COMPANY_NUMBER, source),
+            key=f"company_link_{source}",
+            placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
+            help="Enter a link to the company’s Companies House record or its company registration number. "
+                 "We’ll use this to find the company’s details on Companies House.",
+        )
+        show_industry(company_link)
+        show_entity_name_check(entity_name, company_link)
+        website = st.text_input("Company website", value=remembered("website", "", source), key=f"website_{source}",
+                                placeholder="e.g. example.com")
+        fca_frn = st.text_input(
+            "FCA firm reference number", key=f"fca_{source}", placeholder="e.g. 730427",
+            value=remembered("fca_frn", SAMPLE_FCA_FRN, source),
+            help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
+        )
+        show_fca_firm(fca_frn, company_link)
 
-# Start again whenever the set of documents changes
-pack_key = pack_fingerprint(documents) if documents else None
-if st.session_state.get("pack_key") != pack_key:
-    st.session_state.pack_key = pack_key
-    st.session_state.pop("identification", None)
-    st.session_state.pop("assessment", None)
+        source = st.segmented_control(
+            "Documents", ["Sample pack", "Upload documents"], default=saved.get("source", "Sample pack"), key="source"
+        ) or "Sample pack"
+        if source == "Sample pack":
+            documents = SAMPLE_DOCUMENTS
+            st.caption(
+                f"{len(documents)} specimen documents for the fictitious EXAMPLE PAYMENTS LTD, with deliberate gaps. "
+                "Saved answers are replayed, so the sample costs nothing to run."
+            )
+            st.pills("Files", [d.name for d in documents], disabled=True, label_visibility="collapsed")
+        else:
+            earlier = saved.get("documents", []) if saved.get("source") == "Upload documents" else []
+            kept = []
+            if earlier:
+                names = st.multiselect("Documents in this review", [d.name for d in earlier],
+                                       default=[d.name for d in earlier], key="kept_documents",
+                                       help="Remove a document by clicking its ×. Add more below.")
+                kept = [d for d in earlier if d.name in names]
+            uploads = st.file_uploader("Add documents (PDFs or photos)" if earlier else "Company documents (PDFs or photos)",
+                                       type=UPLOAD_TYPES, accept_multiple_files=True)
+            added = [UploadedDocument(u.name, u.getvalue(), u.type or "application/pdf") for u in uploads or []]
+            added_names = {d.name for d in added}
+            documents = [d for d in kept if d.name not in added_names] + added  # a new file replaces one with its name
+            st.caption(
+                ":material/lock: Only upload fictitious or approved documents: files are sent to Anthropic to be read.")
 
-if not documents:
-    st.info("Add at least one document to continue.", icon=":material/info:")
+    details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
+               "fca_frn": fca_frn}
+    with st.container(horizontal=True):
+        if st.button("Save as draft", icon=":material/save:"):
+            save_draft(details, documents)
+            st.toast("Draft saved on this computer. Open it from Saved drafts any time.", icon=":material/check_circle:")
+        if st.button("Next", type="primary", icon=":material/arrow_forward:", disabled=not documents):
+            if source == "Upload documents" or st.session_state.get("case_id"):
+                save_draft(details, documents)  # uploads are always kept; the sample only if saved as a draft
+            else:
+                st.session_state.entity = {**details, "documents": []}
+            st.session_state.screen = "documents"
+            st.rerun()
+    if not documents:
+        st.caption("Add at least one document to continue.")
     st.stop()
 
-# --- 2. Identify documents ---
+# --- Screens 2 to 5: the checks, using the saved details ---
+
+SCREENS = ["details", "documents", "industry", "checks", "results"]
+screen = st.session_state.screen if st.session_state.get("screen") in SCREENS else "documents"
+
+source = saved["source"]
+entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
+documents = SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]
+saved_answers = SAMPLE_ANSWERS if source == "Sample pack" else answer_paths(st.session_state.case_id)
+
+
+def go(to: str) -> None:
+    st.session_state.screen = to
+    st.rerun()
+
+
+def navigation(next_label: str | None = None, next_ready: bool = True, save=None) -> None:
+    """Back and Next buttons. save runs first on either, so this screen's choices are kept whichever way you go."""
+    position = SCREENS.index(screen)
+    with st.container(horizontal=True):
+        if st.button("Back", icon=":material/arrow_back:", key=f"back_{screen}"):
+            if save and next_ready:
+                save()
+            go(SCREENS[position - 1])
+        if next_label and st.button(next_label, type="primary", icon=":material/arrow_forward:",
+                                    disabled=not next_ready, key=f"next_{screen}"):
+            if save:
+                save()
+            go(SCREENS[position + 1])
+
 
 with st.container(border=True):
-    st.subheader(":material/plagiarism: 2. Check what each document is")
-    if "identification" not in st.session_state:
-        st.caption(f"Claude reads the {len(documents)} files and labels each one (roughly 1p per document).")
-        if not st.button("Identify documents", type="primary", icon=":material/search:"):
-            st.stop()
-        with st.spinner("Claude is reading the documents..."):
-            try:
-                st.session_state.identification = identify_documents(documents, saved_answer=saved_answers.get("labels"))
-            except (ExtractionFailed, UnsupportedFile) as error:
-                st.error(f"Could not identify the documents: {error}", icon=":material/error:")
-                st.stop()
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.subheader(":material/domain: " + (entity_name or "Legal entity"), width="stretch")
+        if st.button("Edit details", icon=":material/edit:"):
+            go("details")
+    summary = [("Company", company_link), ("FCA FRN", fca_frn), ("Website", website),
+               ("Documents", f"{len(documents)} files")]
+    st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
+st.caption(f"Step {SCREENS.index(screen) + 1} of {len(SCREENS)}")
 
-    identification = st.session_state.identification
-    st.caption("Change a label if Claude got it wrong. The checks use these labels.")
-    edited = st.data_editor(
-        pd.DataFrame(
-            [{"File": label.name, "Document type": label.type_label, "Why": label.reason}
-             for label in identification.labels]
-        ),
-        column_config={
-            "Document type": st.column_config.SelectboxColumn(options=list(DOCUMENT_TYPES.values()), required=True),
-            "Why": st.column_config.TextColumn("Why Claude thinks so"),
-        },
-        disabled=["File", "Why"],
-        hide_index=True,
-        key=f"labels_{pack_key}",
-    )
-    confirmed = [
-        DocumentLabel(row["File"], TYPE_KEY[row["Document type"]], row["Why"]) for _, row in edited.iterrows()
-    ]
-    st.caption(
-        "Labels: replayed, $0.00" if identification.replayed
-        else f"Labels: about ${identification.cost_usd:.3f}"
-    )
+# Start again whenever the set of documents changes
+pack_key = pack_fingerprint(documents)
+if st.session_state.get("pack_key") != pack_key:
+    st.session_state.pack_key = pack_key
+    for key in ("identification", "labels", "industry", "choice", "assessment"):
+        st.session_state.pop(key, None)
 
-# --- 3. Industry ---
+def remember(**choices) -> None:
+    """Keep the reviewer's label corrections or industry choice for this session, and in the draft if there is one."""
+    st.session_state.update(choices)
+    if st.session_state.get("case_id"):
+        save_progress(st.session_state.case_id, pack_key, st.session_state.get("labels"),
+                      st.session_state.get("choice"))
+
+
+# --- Screen 2: what each document is ---
+
+if screen == "documents":
+    with st.container(border=True):
+        st.subheader(":material/plagiarism: Check what each document is")
+        if "identification" not in st.session_state:
+            st.caption(f"Claude reads the {len(documents)} files and labels each one (roughly 1p per document).")
+            if st.button("Identify documents", type="primary", icon=":material/search:"):
+                with st.spinner("Claude is reading the documents..."):
+                    try:
+                        st.session_state.identification = identify_documents(
+                            documents, saved_answer=saved_answers.get("labels"))
+                    except (ExtractionFailed, UnsupportedFile) as error:
+                        st.error(f"Could not identify the documents: {error}", icon=":material/error:")
+                st.rerun()
+        else:
+            identification = st.session_state.identification
+            shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
+            st.caption("Change a label if Claude got it wrong. The checks use these labels.")
+            edited = st.data_editor(
+                pd.DataFrame([{"File": label.name, "Document type": label.type_label, "Why": label.reason}
+                              for label in shown]),
+                column_config={
+                    "Document type": st.column_config.SelectboxColumn(options=list(DOCUMENT_TYPES.values()),
+                                                                      required=True),
+                    "Why": st.column_config.TextColumn("Why Claude thinks so"),
+                },
+                disabled=["File", "Why"],
+                hide_index=True,
+                key=f"labels_{pack_key}",
+            )
+            confirmed = [DocumentLabel(row["File"], TYPE_KEY[row["Document type"]], row["Why"])
+                         for _, row in edited.iterrows()]
+            st.caption("Labels: replayed, $0.00" if identification.replayed
+                       else f"Labels: about ${identification.cost_usd:.3f}")
+    navigation("Next", "identification" in st.session_state, save=lambda: remember(labels=confirmed))
+    st.stop()
+
+confirmed = st.session_state.get("labels") or []
+identification = st.session_state.get("identification")
+if not confirmed or identification is None:
+    go("documents")
+
+# --- Screen 3: industry and checklist ---
 
 links_key = (tuple(confirmed), company_link.strip(), website.strip(), fca_frn.strip())
 if st.session_state.get("industry") and st.session_state.industry[0] != links_key:
     st.session_state.pop("industry")  # documents, labels or links changed
+    st.session_state.pop("choice", None)
 
-with st.container(border=True):
-    st.subheader(":material/domain: 3. Confirm the industry and checklist")
-    if "industry" not in st.session_state:
-        st.caption(
-            "Claude reads the questionnaire, the Companies House record (including its industry codes), the FCA register "
-            "entry and the website, "
-            "and suggests which industry the company is in (roughly 1-2p)."
-        )
-        if not st.button("Suggest the industry", type="primary", icon=":material/search:"):
-            st.stop()
-        sources, link_warnings = fetch_links(company_link, website, fca_frn)
-        for warning in link_warnings:
-            st.warning(warning, icon=":material/warning:")
-        with st.spinner("Claude is working out the industry..."):
-            try:
-                suggestion = suggest_industry(documents, confirmed, sources, saved_answer=saved_answers.get("industry"))
-            except (ExtractionFailed, UnsupportedFile) as error:
-                st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
-                st.stop()
-        st.session_state.industry = (links_key, suggestion)
+if screen == "industry":
+    with st.container(border=True):
+        st.subheader(":material/domain: Confirm the industry and checklist")
+        if "industry" not in st.session_state:
+            st.caption(
+                "Claude reads the questionnaire, the Companies House record (including its industry codes), the FCA "
+                "register entry and the website, and suggests which industry the company is in (roughly 1-2p)."
+            )
+            if st.button("Suggest the industry", type="primary", icon=":material/search:"):
+                sources, link_warnings = fetch_links(company_link, website, fca_frn)
+                for warning in link_warnings:
+                    st.warning(warning, icon=":material/warning:")
+                with st.spinner("Claude is working out the industry..."):
+                    try:
+                        suggestion = suggest_industry(documents, confirmed, sources,
+                                                      saved_answer=saved_answers.get("industry"))
+                        st.session_state.industry = (links_key, suggestion)
+                    except (ExtractionFailed, UnsupportedFile) as error:
+                        st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
+                if "industry" in st.session_state:
+                    st.rerun()
+        else:
+            suggestion = st.session_state.industry[1]
+            st.markdown(f"**Claude suggests:** {suggestion.industry_label}  \n{suggestion.reason}")
+            if suggestion.sources_agree == "no":
+                st.warning(f"**The sources disagree.** {suggestion.disagreement}", icon=":material/warning:")
+            else:
+                st.caption(SOURCES_AGREE[suggestion.sources_agree])
+            if suggestion.evidence:
+                with st.expander("Evidence"):
+                    st.markdown("\n".join(f"- {quote}" for quote in suggestion.evidence))
+            chosen_industry, chosen_checklist = st.session_state.get("choice", (suggestion.industry, None))
+            industry = INDUSTRY_KEY[st.selectbox(
+                "Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
+                key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
+            )]
+            suggested_checklist, written_for_industry = checklist_for(industry)
+            if industry != chosen_industry or chosen_checklist is None:
+                chosen_checklist = suggested_checklist
+            checklist = CHECKLIST_KEY[st.selectbox(
+                "Checklist", [name for name, _ in CHECKLISTS.values()], index=list(CHECKLISTS).index(chosen_checklist),
+                key=f"checklist_{hash(links_key)}_{industry}",
+                help="Suggested from the industry. Choose another if a different checklist fits the company better.",
+            )]
+            if not written_for_industry:
+                st.caption(":material/info: There is no checklist written for this industry yet, so the fintech one "
+                           "is suggested.")
+            if checklist != suggested_checklist:
+                st.caption(":material/edit: You chose a different checklist from the one suggested for this industry.")
+            st.caption("Industry: replayed, $0.00" if suggestion.replayed
+                       else f"Industry: about ${suggestion.cost_usd:.3f}")
+    navigation("Next", "industry" in st.session_state, save=lambda: remember(choice=(industry, checklist)))
+    st.stop()
 
-    suggestion = st.session_state.industry[1]
-    st.markdown(f"**Claude suggests:** {suggestion.industry_label}  \n{suggestion.reason}")
-    if suggestion.sources_agree == "no":
-        st.warning(f"**The sources disagree.** {suggestion.disagreement}", icon=":material/warning:")
-    else:
-        st.caption(SOURCES_AGREE[suggestion.sources_agree])
-    if suggestion.evidence:
-        with st.expander("Evidence"):
-            st.markdown("\n".join(f"- {quote}" for quote in suggestion.evidence))
-    industry = INDUSTRY_KEY[st.selectbox(
-        "Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(suggestion.industry),
-        key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
-    )]
-    suggested_checklist, written_for_industry = checklist_for(industry)
-    checklist = CHECKLIST_KEY[st.selectbox(
-        "Checklist", [name for name, _ in CHECKLISTS.values()], index=list(CHECKLISTS).index(suggested_checklist),
-        key=f"checklist_{hash(links_key)}_{industry}",
-        help="Suggested from the industry. Choose another if a different checklist fits the company better.",
-    )]
-    if not written_for_industry:
-        st.caption(":material/info: There is no checklist written for this industry yet, so the fintech one is suggested.")
-    if checklist != suggested_checklist:
-        st.caption(":material/edit: You chose a different checklist from the one suggested for this industry.")
-    st.caption(
-        "Industry: replayed, $0.00" if suggestion.replayed
-        else f"Industry: about ${suggestion.cost_usd:.3f}"
-    )
+if "industry" not in st.session_state or "choice" not in st.session_state:
+    go("industry")
+suggestion = st.session_state.industry[1]
+industry, checklist = st.session_state.choice
+suggested_checklist, _ = checklist_for(industry)
 
 # Results no longer match if the labels or the checklist changed
 if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
     st.session_state.pop("assessment")
 
-# --- 4. Run the checks ---
+# --- Screen 4: run the checks ---
 
-with st.container(border=True):
-    st.subheader(":material/fact_check: 4. Run the KYC checks")
-    if "assessment" not in st.session_state:
-        st.caption("Claude reads every document again against the checklist (roughly 2p per document).")
-        replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
-        if source == "Sample pack" and not replay_sample:
-            st.caption(":material/payments: The sample's saved answer is for the fintech checklist; with this checklist "
-                       "Claude is asked again (about 20p).")
-        if not st.button("Run KYC checks", type="primary", icon=":material/play_arrow:"):
-            st.stop()
-        sources, _ = fetch_links(company_link, website, fca_frn)
-        with st.spinner("Claude is mapping the evidence to the checklist..."):
-            try:
-                result = assess_pack(
-                    documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
-                    saved_answer=saved_answers.get("assessment") if replay_sample else None,
-                )
-            except ExtractionFailed as error:
-                st.error(f"Could not run the checks: {error}", icon=":material/error:")
-                st.stop()
-        st.session_state.assessment = ((confirmed, checklist), result)
-    original = st.session_state.assessment[1]
-    total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
-    st.caption(
-        "Checks: replayed, $0.00" if original.replayed
-        else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}"
-    )
+if screen == "checks":
+    with st.container(border=True):
+        st.subheader(":material/fact_check: Run the KYC checks")
+        st.caption(f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]}.")
+        if "assessment" not in st.session_state:
+            st.caption("Claude reads every document again against the checklist (roughly 2p per document).")
+            replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
+            if source == "Sample pack" and not replay_sample:
+                st.caption(":material/payments: The sample's saved answer is for the fintech checklist; with this "
+                           "checklist Claude is asked again (about 20p).")
+            if st.button("Run KYC checks", type="primary", icon=":material/play_arrow:"):
+                sources, _ = fetch_links(company_link, website, fca_frn)
+                with st.spinner("Claude is mapping the evidence to the checklist..."):
+                    try:
+                        result = assess_pack(
+                            documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
+                            saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack"
+                            else None,
+                        )
+                        st.session_state.assessment = ((confirmed, checklist), result)
+                    except ExtractionFailed as error:
+                        st.error(f"Could not run the checks: {error}", icon=":material/error:")
+                if "assessment" in st.session_state:
+                    st.rerun()
+        else:
+            original = st.session_state.assessment[1]
+            total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
+            st.success("The checks are done. Click See results to view them.", icon=":material/check_circle:")
+            st.caption("Checks: replayed, $0.00" if original.replayed
+                       else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
+    navigation("See results", "assessment" in st.session_state)
+    st.stop()
+
+if "assessment" not in st.session_state:
+    go("checks")
+original = st.session_state.assessment[1]
+
+# --- Screen 5: results ---
 
 # The analyst's saved changes for this set of documents and checklist
 review_path = case_file(pack_key, checklist)
@@ -391,8 +567,6 @@ overrides = load_overrides(review_path)
 # The legal entity name rule on check 1.1, then the analyst's changes, which always have the final say
 named = apply_entity_name(original, entity_name, parse_company_number(company_link), lookup=cached_company)
 result = apply_overrides(named, overrides)
-
-# --- Results ---
 
 st.header("Results")
 st.caption(
@@ -483,16 +657,17 @@ with st.container(border=True):
 
     if overrides:
         st.markdown("**Saved changes**")
-    for saved in overrides.values():
+    for change in overrides.values():
         with st.container(horizontal=True, vertical_alignment="center"):
             st.markdown(
-                f"**{saved.check_id}** · {saved.original_status.value} → **{saved.status.value}** "
-                f"by {saved.reviewer} on {saved.reviewed_on}: {saved.note}",
+                f"**{change.check_id}** · {change.original_status.value} → **{change.status.value}** "
+                f"by {change.reviewer} on {change.reviewed_on}: {change.note}",
                 width="stretch",
             )
-            st.button("Undo", key=f"undo_{saved.check_id}", icon=":material/undo:",
-                      on_click=remove_override, args=(review_path, saved.check_id))
+            st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
+                      on_click=remove_override, args=(review_path, change.check_id))
 
+navigation()
 st.caption(
     "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "
     "Not legal advice."

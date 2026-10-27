@@ -1,0 +1,113 @@
+"""Draft reviews saved on this computer: the entity's details and its documents, so a review can be continued later.
+
+Each draft has its own folder in the cases folder, holding case.json, the documents (stored under a fingerprint of
+their contents, never under the uploaded file name) and Claude's saved answers. The folder is git-ignored: drafts
+hold client documents and must not be committed.
+"""
+
+import json
+import secrets
+from datetime import datetime
+from pathlib import Path
+
+from services.pack import DocumentLabel, UploadedDocument
+
+CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
+DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn")
+
+
+def new_case_id() -> str:
+    """A short random name for a new draft's folder."""
+    return datetime.now().strftime("%Y%m%d-") + secrets.token_hex(4)
+
+
+def _folder(case_id: str, folder: Path | None) -> Path:
+    if not case_id or any(c not in "0123456789abcdef-" for c in case_id):
+        raise ValueError(f"'{case_id}' is not a draft name")
+    return (folder or CASES_DIR) / case_id
+
+
+def save_case(case_id: str, details: dict, documents: list[UploadedDocument], folder: Path | None = None) -> None:
+    """Save (or update) a draft: its details and exactly these documents."""
+    path = _folder(case_id, folder)
+    stored = path / "documents"
+    stored.mkdir(parents=True, exist_ok=True)
+    for document in documents:
+        target = stored / document.fingerprint
+        if not target.exists():
+            target.write_bytes(document.data)
+    keep = {d.fingerprint for d in documents}
+    for old in stored.iterdir():
+        if old.name not in keep:
+            old.unlink()  # a document removed from the review
+    record = {
+        "details": {field: details.get(field, "") for field in DETAIL_FIELDS},
+        "documents": [{"name": d.name, "media_type": d.media_type, "sha256": d.fingerprint} for d in documents],
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    temporary = path / "case.json.tmp"
+    temporary.write_text(json.dumps(record, indent=2))
+    temporary.replace(path / "case.json")  # write in one go, so a half-written file is never left behind
+
+
+def load_case(case_id: str, folder: Path | None = None) -> tuple[dict, list[UploadedDocument]]:
+    """A draft's details and documents."""
+    path = _folder(case_id, folder)
+    record = json.loads((path / "case.json").read_text())
+    documents = [
+        UploadedDocument(d["name"], (path / "documents" / d["sha256"]).read_bytes(), d["media_type"])
+        for d in record["documents"]
+    ]
+    return record["details"], documents
+
+
+def list_cases(folder: Path | None = None) -> list[dict]:
+    """Every saved draft, most recently saved first: id, entity name, company, number of documents, saved at."""
+    drafts = []
+    for case_file in (folder or CASES_DIR).glob("*/case.json"):
+        record = json.loads(case_file.read_text())
+        drafts.append({
+            "id": case_file.parent.name,
+            "entity_name": record["details"].get("entity_name", ""),
+            "company_link": record["details"].get("company_link", ""),
+            "documents": len(record["documents"]),
+            "saved_at": record["saved_at"],
+        })
+    return sorted(drafts, key=lambda d: d["saved_at"], reverse=True)
+
+
+def answer_paths(case_id: str, folder: Path | None = None) -> dict[str, Path]:
+    """Where a draft keeps Claude's answers, so reopening it with the same documents costs nothing."""
+    path = _folder(case_id, folder)
+    return {kind: path / f"{kind}.answer.json" for kind in ("labels", "industry", "assessment")}
+
+
+def save_progress(case_id: str, pack_key: str, labels: list[DocumentLabel] | None, choice: tuple[str, str] | None,
+                  folder: Path | None = None) -> None:
+    """Keep the reviewer's label corrections and industry and checklist choice with the draft.
+
+    pack_key is the fingerprint of the documents they apply to; they are dropped if the documents change.
+    """
+    path = _folder(case_id, folder)
+    path.mkdir(parents=True, exist_ok=True)
+    record = {
+        "pack_key": pack_key,
+        "labels": [[label.name, label.document_type, label.reason] for label in labels or []],
+        "choice": list(choice) if choice else None,
+    }
+    temporary = path / "progress.json.tmp"
+    temporary.write_text(json.dumps(record, indent=2))
+    temporary.replace(path / "progress.json")
+
+
+def load_progress(case_id: str, folder: Path | None = None) -> dict:
+    """The saved label corrections and industry choice: {"pack_key", "labels", "choice"}, or {} if none."""
+    path = _folder(case_id, folder) / "progress.json"
+    if not path.exists():
+        return {}
+    record = json.loads(path.read_text())
+    return {
+        "pack_key": record["pack_key"],
+        "labels": [DocumentLabel(*item) for item in record["labels"]],
+        "choice": tuple(record["choice"]) if record["choice"] else None,
+    }
