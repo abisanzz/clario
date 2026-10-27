@@ -48,7 +48,13 @@ from services.pack import (  # noqa: E402
     identify_documents,
     pack_fingerprint,
 )
-from services.reviews import apply_overrides, case_file, load_overrides, remove_override, save_override  # noqa: E402
+from services.reviews import (  # noqa: E402
+    apply_overrides,
+    case_file,
+    load_overrides,
+    remove_override,
+    save_line_reviews,
+)
 from services.validator import Status, entity_name_matches  # noqa: E402
 from services.website import WebsiteFetchFailed, website_text  # noqa: E402
 
@@ -73,6 +79,7 @@ STATUS_TEXT = {
     Status.NOT_STARTED: "⏳ Not started",
 }
 TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
+STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
 CHECKLIST_KEY = {name: key for key, (name, _) in CHECKLISTS.items()}
 SAMPLE_CHECKLIST = "fintech"  # the checklist the sample pack's saved answer was made with
@@ -613,76 +620,100 @@ for column, title, icon, gaps, empty in [
         for outcome in gaps:
             st.markdown(f"**{outcome.check.id} · {outcome.check.evidence_source}**  \n{outcome.finding}")
 
+# --- Every check, validated line by line ---
+
 st.subheader("Every check, by section")
+st.caption(
+    "Validate each line: tick **Validated** once you have checked it, change the **Status** if you disagree (a "
+    "reviewer note is then required), and add a note if useful. Then click **Save review**. The original answer from "
+    "Claude or the rules is kept beside yours. :material/lock: Saved on this computer only, never sent to Claude."
+)
+validated_count = sum(bool(o.validated_by) for o in result.outcomes)
+st.progress(validated_count / len(result.outcomes),
+            text=f"{validated_count} of {len(result.outcomes)} lines validated")
+
+version = st.session_state.get("review_version", 0)  # fresh tables after each save
+edited_sections = []
 for section, outcomes in groupby(result.outcomes, key=lambda o: o.check.section):
     outcomes = list(outcomes)
     present = sum(o.status is Status.PRESENT for o in outcomes)
     open_issues = sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in outcomes)
-    label = f"{section} · {present} of {len(outcomes)} present" + (f" · {open_issues} to look at" if open_issues else "")
+    done = sum(bool(o.validated_by) for o in outcomes)
+    label = (f"{section} · {present} of {len(outcomes)} present · {done} of {len(outcomes)} validated"
+             + (f" · {open_issues} to look at" if open_issues else ""))
     with st.expander(label, expanded=open_issues > 0):
-        st.dataframe(
-            pd.DataFrame([
-                {
-                    "ID": o.check.id,
-                    "Check": o.check.check,
-                    "Status": STATUS_TEXT[o.status],
-                    "Finding": o.finding,
-                    "Evidence": o.evidence,
-                    "Decided by": o.decided_by,
-                    "Claude's view": o.claude_finding,
-                    "Before the analyst's change": o.before_review,
-                }
-                for o in outcomes
-            ]),
+        table = pd.DataFrame([
+            {
+                "ID": o.check.id,
+                "Check": o.check.check,
+                "Status": STATUS_TEXT[o.status],
+                "Validated": bool(o.validated_by),
+                "Reviewer note": o.reviewer_note,
+                "Finding": o.finding,
+                "Evidence": o.evidence,
+                "Decided by": o.decided_by,
+                "Validated by": o.validated_by,
+                "Claude's view": o.claude_finding,
+                "Before the analyst's change": o.before_review,
+            }
+            for o in outcomes
+        ])
+        edited = st.data_editor(
+            table,
             column_config={
                 "Check": st.column_config.TextColumn(width="medium"),
+                "Status": st.column_config.SelectboxColumn(options=list(STATUS_TEXT.values()), required=True,
+                                                           help="Change it if you disagree; a reviewer note is then "
+                                                                "required"),
+                "Validated": st.column_config.CheckboxColumn(help="Tick once you have checked this line"),
+                "Reviewer note": st.column_config.TextColumn(width="medium",
+                                                             help="Required when you change the status"),
                 "Finding": st.column_config.TextColumn(width="large"),
                 "Evidence": st.column_config.ListColumn(width="large"),
                 "Claude's view": st.column_config.TextColumn(help="Shown when the fixed rules made the decision"),
                 "Before the analyst's change": st.column_config.TextColumn(
                     help="The original answer from Claude or the rules, shown when an analyst changed it"),
             },
+            disabled=["ID", "Check", "Finding", "Evidence", "Decided by", "Validated by", "Claude's view",
+                      "Before the analyst's change"],
             hide_index=True,
+            key=f"lines_{review_path.stem}_{section}_{version}",
         )
+        edited_sections.append((table, edited))
 
-# --- Analyst review ---
+# Lines the reviewer touched: a different status, tick or note from what is shown
+touched = []
+for table, edited in edited_sections:
+    for (_, before), (_, after) in zip(table.iterrows(), edited.iterrows()):
+        if (before["Status"], before["Validated"], before["Reviewer note"]) != (
+                after["Status"], after["Validated"], after["Reviewer note"]):
+            touched.append((after["ID"], STATUS_FROM_TEXT[after["Status"]], after["Reviewer note"] or "",
+                            bool(after["Validated"])))
 
-with st.container(border=True):
-    st.subheader(":material/rate_review: Review a check")
-    st.caption(
-        "Change a result once you have looked at the evidence. The original answer is kept beside yours. "
-        ":material/lock: Saved on this computer only (the reviews folder), never sent to Claude or committed."
-    )
-    outcome_by_id = {o.check.id: o for o in result.outcomes}
-    with st.form("review", clear_on_submit=True):
-        check_id = st.selectbox(
-            "Check", list(outcome_by_id),
-            format_func=lambda i: f"{i} · {outcome_by_id[i].check.check[:90]} ({outcome_by_id[i].status.value})",
-        )
-        new_status = Status(st.segmented_control(
-            "New status", [s.value for s in STATUS_TEXT], default=Status.PRESENT.value, required=True))
-        note = st.text_area("Reason", placeholder="e.g. Client confirmed by email on 22 Oct that Jamie Example holds 25%")
-        reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""))
-        if st.form_submit_button("Save change", type="primary", icon=":material/save:"):
-            try:
-                save_override(review_path, named, check_id, new_status, note, reviewer)
-            except ValueError as error:
-                st.error(str(error), icon=":material/error:")
-            else:
-                st.session_state.last_reviewer = reviewer.strip()
-                st.rerun()
+with st.container(horizontal=True, vertical_alignment="bottom"):
+    reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""), width=300,
+                             help="Your name, recorded against every line you validate or change.")
+    if st.button("Save review", type="primary", icon=":material/save:", disabled=not touched):
+        problems = save_line_reviews(review_path, named, touched, reviewer)
+        if problems:
+            st.error("Nothing was saved yet:\n" + "\n".join(f"- {problem}" for problem in problems),
+                     icon=":material/error:")
+        else:
+            st.session_state.last_reviewer = reviewer.strip()
+            st.session_state.review_version = version + 1
+            st.rerun()
+st.caption(f"{len(touched)} line(s) changed and not yet saved." if touched else "No unsaved changes.")
 
-    if overrides:
-        st.markdown("**Saved changes**")
-    for change in overrides.values():
-        with st.container(horizontal=True, vertical_alignment="center"):
-            st.markdown(
-                f"**{change.check_id}** · {change.original_status.value} → **{change.status.value}** "
-                f"by {change.reviewer} on {change.reviewed_on}: {change.note}",
-                width="stretch",
-            )
-            st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
-                      on_click=remove_override, args=(review_path, change.check_id))
+if overrides:
+    with st.expander(f"Saved reviews of lines ({len(overrides)})"):
+        for change in overrides.values():
+            with st.container(horizontal=True, vertical_alignment="center"):
+                what = (f"{change.original_status.value} → **{change.status.value}**"
+                        if change.status is not change.original_status else "validated")
+                st.markdown(f"**{change.check_id}** · {what} by {change.reviewer} on {change.reviewed_on}"
+                            + (f": {change.note}" if change.note else ""), width="stretch")
+                st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
+                          on_click=remove_override, args=(review_path, change.check_id))
 
 navigation()
 st.caption(

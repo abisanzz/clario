@@ -45,7 +45,7 @@ Company website ──────────┘  Claude: evidence for every ch
 - **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
 - **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, every permission, requirements, disciplinary history and approved individuals). The page warns straight away if the FCA's record links the firm to a different company number.
 - **Drafts.** A review can be saved as a draft and continued later: add or remove documents, edit details, and pick up where you left off. Claude's answers are kept with the draft, so reopening it costs nothing.
-- **Analyst overrides persist.** Each change needs a reason and a reviewer name, keeps the original answer, can be undone, and is saved per case on the analyst's own machine.
+- **Line-by-line validation.** The analyst ticks each checklist line as validated, or changes its status with a required note. Every line records who validated it and when, keeps the original answer, can be undone, and is saved on the analyst's own machine.
 
 ## Design choices
 

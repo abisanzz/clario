@@ -290,6 +290,8 @@ class CheckOutcome:
     decided_by: str = "Claude"  # "Rules", "Claude", or who decides it if not assessed here
     claude_finding: str = ""  # Claude's view, kept when the rules decide
     before_review: str = ""  # the original answer, when an analyst has changed it
+    validated_by: str = ""  # "name, date" when an analyst has checked this line
+    reviewer_note: str = ""  # the analyst's note on this line
 
 
 @dataclass(frozen=True)
