@@ -8,6 +8,7 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))  # so "services" can be imported when Streamlit runs this file
 
+from services.cases import list_cases  # noqa: E402
 from services.pack import DOCUMENT_TYPES  # noqa: E402
 
 REVIEW_PAGE = "app_pages/review.py"
@@ -23,8 +24,13 @@ def cards(items: list[tuple[str, str, str]]) -> None:
 
 
 def start_button(key: str) -> None:
-    if st.button("Start document review", type="primary", icon=":material/arrow_forward:", key=key):
-        st.switch_page(REVIEW_PAGE)
+    with st.container(horizontal=True):
+        if st.button("Start document review", type="primary", icon=":material/arrow_forward:", key=key):
+            st.session_state.screen = "details"
+            st.switch_page(REVIEW_PAGE)
+        if list_cases() and st.button("Continue a saved review", icon=":material/folder_open:", key=f"{key}_continue"):
+            st.session_state.screen = "details"  # the saved reviews are listed at the top of the first screen
+            st.switch_page(REVIEW_PAGE)
 
 
 # --- Hero ---
@@ -112,9 +118,8 @@ with st.container(border=True):
     st.markdown("**:material/lock: How your information is handled**")
     st.markdown(
         "- Uploaded documents are sent to Anthropic's API so Claude can read them.\n"
-        "- When you save a review as a draft (or click Next), its details and documents are saved on the computer "
-        "running Clario, so you can come back to add documents or edit details. Otherwise they are held only while "
-        "your review session is open.\n"
+        "- Each review (its details, documents and progress) is saved on the computer running Clario when you "
+        "click Next or Save as draft, so you can reopen it later to add documents or edit details.\n"
         "- The company number and FCA firm reference number you enter are looked up on the public Companies House "
         "and FCA registers.\n"
         "- A reviewer's changes to results are saved only on the computer running Clario."

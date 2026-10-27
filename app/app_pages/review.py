@@ -257,14 +257,15 @@ if st.session_state.get("screen", "details") == "details":
     drafts = list_cases()
     if drafts or st.session_state.get("case_id"):
         with st.container(border=True):
-            st.subheader(":material/drafts: Saved drafts")
+            st.subheader(":material/folder_open: Your saved reviews")
             if st.session_state.get("case_id"):
-                st.caption(f"You are working on a saved draft: {saved.get('entity_name') or 'Unnamed entity'}.")
+                st.caption(f"You are working on a saved review: {saved.get('entity_name') or 'Unnamed entity'}. "
+                           "Changes are saved when you click Next or Save as draft.")
             with st.container(horizontal=True, vertical_alignment="bottom"):
                 by_id = {d["id"]: d for d in drafts}
                 chosen = st.selectbox("Continue a saved review", list(by_id), format_func=lambda i: draft_label(by_id[i]),
-                                      index=None, placeholder="Choose a draft", width="stretch") if drafts else None
-                if st.button("Open draft", icon=":material/folder_open:", disabled=not chosen):
+                                      index=None, placeholder="Choose a review", width="stretch") if drafts else None
+                if st.button("Open review", icon=":material/folder_open:", disabled=not chosen):
                     details, stored = load_case(chosen)
                     start_over({**details, "documents": stored}, chosen)
                     progress = load_progress(chosen)  # label corrections and industry choice, if saved
@@ -338,16 +339,17 @@ if st.session_state.get("screen", "details") == "details":
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:"):
             save_draft(details, documents)
-            st.toast("Draft saved on this computer. Open it from Saved drafts any time.", icon=":material/check_circle:")
+            st.toast("Saved on this computer. Reopen it from Your saved reviews any time.", icon=":material/check_circle:")
         if st.button("Next", type="primary", icon=":material/arrow_forward:", disabled=not documents):
-            if source == "Upload documents" or st.session_state.get("case_id"):
-                save_draft(details, documents)  # uploads are always kept; the sample only if saved as a draft
-            else:
-                st.session_state.entity = {**details, "documents": []}
+            save_draft(details, documents)  # every review is saved, so it can be reopened and amended later
             st.session_state.screen = "documents"
             st.rerun()
     if not documents:
         st.caption("Add at least one document to continue.")
+    elif source == "Upload documents":
+        st.caption(f"Next asks Claude to identify each document (roughly 1p per document, about "
+                   f"${len(documents) * 0.011:.2f} for these {len(documents)}). A reopened draft with the same "
+                   "documents costs nothing.")
     st.stop()
 
 # --- Screens 2 to 5: the checks, using the saved details ---
@@ -389,6 +391,9 @@ with st.container(border=True):
     summary = [("Company", company_link), ("FCA FRN", fca_frn), ("Website", website),
                ("Documents", f"{len(documents)} files")]
     st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
+    if st.session_state.get("case_id"):
+        st.caption(":material/cloud_done: Saved on this computer. You can close Clario and reopen this review from "
+                   "Your saved reviews on the Review page.")
 st.caption(f"Step {SCREENS.index(screen) + 1} of {len(SCREENS)}")
 
 # Start again whenever the set of documents changes
@@ -411,17 +416,15 @@ def remember(**choices) -> None:
 if screen == "documents":
     with st.container(border=True):
         st.subheader(":material/plagiarism: Check what each document is")
-        if "identification" not in st.session_state:
-            st.caption(f"Claude reads the {len(documents)} files and labels each one (roughly 1p per document).")
-            if st.button("Identify documents", type="primary", icon=":material/search:"):
-                with st.spinner("Claude is reading the documents..."):
-                    try:
-                        st.session_state.identification = identify_documents(
-                            documents, saved_answer=saved_answers.get("labels"))
-                    except (ExtractionFailed, UnsupportedFile) as error:
-                        st.error(f"Could not identify the documents: {error}", icon=":material/error:")
-                st.rerun()
-        else:
+        if "identification" not in st.session_state:  # identify straight away when this screen opens
+            with st.spinner(f"Claude is reading the {len(documents)} documents..."):
+                try:
+                    st.session_state.identification = identify_documents(
+                        documents, saved_answer=saved_answers.get("labels"))
+                except (ExtractionFailed, UnsupportedFile) as error:
+                    st.error(f"Could not identify the documents: {error}", icon=":material/error:")
+                    st.button("Try again", icon=":material/refresh:")
+        if "identification" in st.session_state:
             identification = st.session_state.identification
             shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
             st.caption("Change a label if Claude got it wrong. The checks use these labels.")
@@ -442,6 +445,9 @@ if screen == "documents":
             st.caption("Labels: replayed, $0.00" if identification.replayed
                        else f"Labels: about ${identification.cost_usd:.3f}")
     navigation("Next", "identification" in st.session_state, save=lambda: remember(labels=confirmed))
+    if source == "Upload documents":
+        st.caption("Next asks Claude to suggest the industry (roughly 3p). A reopened draft with unchanged documents "
+                   "costs nothing.")
     st.stop()
 
 confirmed = st.session_state.get("labels") or []
@@ -459,25 +465,19 @@ if st.session_state.get("industry") and st.session_state.industry[0] != links_ke
 if screen == "industry":
     with st.container(border=True):
         st.subheader(":material/domain: Confirm the industry and checklist")
-        if "industry" not in st.session_state:
-            st.caption(
-                "Claude reads the questionnaire, the Companies House record (including its industry codes), the FCA "
-                "register entry and the website, and suggests which industry the company is in (roughly 1-2p)."
-            )
-            if st.button("Suggest the industry", type="primary", icon=":material/search:"):
-                sources, link_warnings = fetch_links(company_link, website, fca_frn)
-                for warning in link_warnings:
-                    st.warning(warning, icon=":material/warning:")
-                with st.spinner("Claude is working out the industry..."):
-                    try:
-                        suggestion = suggest_industry(documents, confirmed, sources,
-                                                      saved_answer=saved_answers.get("industry"))
-                        st.session_state.industry = (links_key, suggestion)
-                    except (ExtractionFailed, UnsupportedFile) as error:
-                        st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
-                if "industry" in st.session_state:
-                    st.rerun()
-        else:
+        if "industry" not in st.session_state:  # suggest straight away when this screen opens
+            sources, link_warnings = fetch_links(company_link, website, fca_frn)
+            for warning in link_warnings:
+                st.warning(warning, icon=":material/warning:")
+            with st.spinner("Claude is reading the questionnaire, the registers and the website to work out the "
+                            "industry..."):
+                try:
+                    suggestion = suggest_industry(documents, confirmed, sources, saved_answer=saved_answers.get("industry"))
+                    st.session_state.industry = (links_key, suggestion)
+                except (ExtractionFailed, UnsupportedFile) as error:
+                    st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
+                    st.button("Try again", icon=":material/refresh:")
+        if "industry" in st.session_state:
             suggestion = st.session_state.industry[1]
             st.markdown(f"**Claude suggests:** {suggestion.industry_label}  \n{suggestion.reason}")
             if suggestion.sources_agree == "no":
@@ -508,6 +508,14 @@ if screen == "industry":
             st.caption("Industry: replayed, $0.00" if suggestion.replayed
                        else f"Industry: about ${suggestion.cost_usd:.3f}")
     navigation("Next", "industry" in st.session_state, save=lambda: remember(choice=(industry, checklist)))
+    if "industry" in st.session_state:
+        if source == "Upload documents":
+            st.caption(f"Next runs the KYC checks: Claude reads every document again against the checklist (roughly "
+                       f"3p per document, about ${len(documents) * 0.027:.2f} for these {len(documents)}). A reopened "
+                       "draft with unchanged documents and checklist costs nothing.")
+        elif checklist != SAMPLE_CHECKLIST:
+            st.caption(":material/payments: The sample's saved answer is for the fintech checklist. With this checklist, "
+                       "Next asks Claude to run the checks again (about 20p).")
     st.stop()
 
 if "industry" not in st.session_state or "choice" not in st.session_state:
@@ -526,27 +534,22 @@ if screen == "checks":
     with st.container(border=True):
         st.subheader(":material/fact_check: Run the KYC checks")
         st.caption(f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]}.")
-        if "assessment" not in st.session_state:
-            st.caption("Claude reads every document again against the checklist (roughly 2p per document).")
+        if "assessment" not in st.session_state:  # run straight away when this screen opens
             replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
-            if source == "Sample pack" and not replay_sample:
-                st.caption(":material/payments: The sample's saved answer is for the fintech checklist; with this "
-                           "checklist Claude is asked again (about 20p).")
-            if st.button("Run KYC checks", type="primary", icon=":material/play_arrow:"):
-                sources, _ = fetch_links(company_link, website, fca_frn)
-                with st.spinner("Claude is mapping the evidence to the checklist..."):
-                    try:
-                        result = assess_pack(
-                            documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
-                            saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack"
-                            else None,
-                        )
-                        st.session_state.assessment = ((confirmed, checklist), result)
-                    except ExtractionFailed as error:
-                        st.error(f"Could not run the checks: {error}", icon=":material/error:")
-                if "assessment" in st.session_state:
-                    st.rerun()
-        else:
+            sources, _ = fetch_links(company_link, website, fca_frn)
+            with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the checklist. "
+                            "This can take a minute..."):
+                try:
+                    result = assess_pack(
+                        documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
+                        saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack"
+                        else None,
+                    )
+                    st.session_state.assessment = ((confirmed, checklist), result)
+                except ExtractionFailed as error:
+                    st.error(f"Could not run the checks: {error}", icon=":material/error:")
+                    st.button("Try again", icon=":material/refresh:")
+        if "assessment" in st.session_state:
             original = st.session_state.assessment[1]
             total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
             st.success("The checks are done. Click See results to view them.", icon=":material/check_circle:")
