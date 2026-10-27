@@ -79,3 +79,73 @@ def test_label_corrections_and_choice_are_kept_with_the_draft(tmp_path):
         "pack_key": "pack-1", "labels": labels, "choice": ("payments", "fintech")}
     save_progress(case_id, "pack-1", labels, None, folder=tmp_path)  # no choice yet
     assert load_progress(case_id, folder=tmp_path)["choice"] is None
+
+
+def test_one_review_per_entity_by_company_number(tmp_path):
+    from services.cases import find_case, save_review
+    first = save_review(None, DETAILS, [CERT], folder=tmp_path)
+    # a new review of the same company, typed differently, replaces it rather than adding another
+    second = save_review(None, {**DETAILS, "entity_name": "Example Payments Limited",
+                                "company_link": "https://find-and-update.company-information.service.gov.uk/company/99999901"},
+                         [CERT, BILL], folder=tmp_path)
+    assert second == first
+    assert [(d["entity_name"], d["documents"]) for d in list_cases(folder=tmp_path)] == [("Example Payments Limited", 2)]
+    assert find_case({"company_link": "99999901"}, folder=tmp_path)["id"] == first
+
+
+def test_one_review_per_entity_by_name_when_there_is_no_number(tmp_path):
+    from services.cases import save_review
+    no_number = {**DETAILS, "company_link": "", "entity_name": "Smith & Jones Ltd"}
+    first = save_review(None, no_number, [CERT], folder=tmp_path)
+    assert save_review(None, {**no_number, "entity_name": "SMITH AND JONES LIMITED"}, [BILL], folder=tmp_path) == first
+    other = save_review(None, {**no_number, "entity_name": "Another Ltd"}, [BILL], folder=tmp_path)
+    assert other != first and len(list_cases(folder=tmp_path)) == 2
+
+
+def test_older_duplicates_are_removed_when_the_entity_is_saved(tmp_path):
+    from services.cases import save_review
+    save_case("20261027-aaaaaaaa", DETAILS, [CERT], folder=tmp_path)  # duplicates saved before this rule existed
+    save_case("20261027-bbbbbbbb", DETAILS, [BILL], folder=tmp_path)
+    kept = save_review("20261027-bbbbbbbb", DETAILS, [BILL, PHOTO], folder=tmp_path)
+    assert kept == "20261027-bbbbbbbb"
+    assert [d["id"] for d in list_cases(folder=tmp_path)] == ["20261027-bbbbbbbb"]
+
+
+def test_a_review_with_no_name_or_number_is_never_merged(tmp_path):
+    from services.cases import save_review
+    blank = {**DETAILS, "company_link": "", "entity_name": ""}
+    assert save_review(None, blank, [CERT], folder=tmp_path) != save_review(None, blank, [BILL], folder=tmp_path)
+
+
+def test_each_review_has_an_id_people_can_type(tmp_path):
+    from services.cases import find_by_review_id, review_id, save_review
+    case_id = save_review(None, DETAILS, [CERT], folder=tmp_path)
+    rid = review_id(case_id)
+    assert rid.startswith("CLR-") and len(rid) == 12
+    assert list_cases(folder=tmp_path)[0]["review_id"] == rid
+    for typed in (rid, rid.lower(), rid[4:], f"  {rid[4:].lower()} ", f"CLR {rid[4:]}"):
+        assert find_by_review_id(typed, folder=tmp_path) == case_id, typed
+    assert find_by_review_id("CLR-00000000", folder=tmp_path) is None
+    assert find_by_review_id("", folder=tmp_path) is None
+
+
+def test_the_id_stays_the_same_when_the_review_is_saved_again(tmp_path):
+    from services.cases import review_id, save_review
+    first = save_review(None, DETAILS, [CERT], folder=tmp_path)
+    again = save_review(None, {**DETAILS, "website": "example.com"}, [CERT, BILL], folder=tmp_path)
+    assert review_id(again) == review_id(first)
+
+
+def test_only_the_latest_review_of_each_entity_is_shown_and_older_ones_can_be_removed(tmp_path):
+    import json
+    from services.cases import latest_reviews, remove_duplicates
+    save_case("20261027-aaaaaaaa", DETAILS, [CERT], folder=tmp_path)            # saved before the one-review rule
+    save_case("20261027-bbbbbbbb", DETAILS, [BILL], folder=tmp_path)
+    save_case("20261027-cccccccc", {**DETAILS, "company_link": "12345678"}, [CERT], folder=tmp_path)
+    record = json.loads((tmp_path / "20261027-aaaaaaaa" / "case.json").read_text())
+    record["saved_at"] = "2026-01-01T09:00:00"
+    (tmp_path / "20261027-aaaaaaaa" / "case.json").write_text(json.dumps(record))
+    assert sorted(d["id"] for d in latest_reviews(folder=tmp_path)) == ["20261027-bbbbbbbb", "20261027-cccccccc"]
+    assert remove_duplicates(folder=tmp_path) == ["20261027-aaaaaaaa"]
+    assert not (tmp_path / "20261027-aaaaaaaa").exists()
+    assert len(list_cases(folder=tmp_path)) == 2

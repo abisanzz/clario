@@ -24,12 +24,14 @@ from services.extractor import ExtractionFailed  # noqa: E402
 from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
 from services.cases import (  # noqa: E402
     answer_paths,
-    list_cases,
     load_case,
     load_progress,
-    new_case_id,
-    save_case,
+    find_by_review_id,
+    find_case,
+    latest_reviews,
+    review_id,
     save_progress,
+    save_review,
 )
 from services.checklist import CHECKLISTS  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
@@ -240,40 +242,55 @@ def start_over(entity: dict, case_id: str | None) -> None:
 
 
 def save_draft(details: dict, documents: list[UploadedDocument]) -> None:
-    """Save the review as a draft on this computer, starting a new draft the first time."""
-    case_id = st.session_state.get("case_id") or new_case_id()
+    """Save the review on this computer. One review per legal entity: this replaces any other saved review of it."""
     stored = documents if details["source"] == "Upload documents" else []  # the sample's files stay where they are
-    save_case(case_id, details, stored)
+    case_id = save_review(st.session_state.get("case_id"), details, stored)
     st.session_state.case_id = case_id
     st.session_state.entity = {**details, "documents": stored}
 
 
+def open_review(case_id: str) -> None:
+    """Load a saved review, with its label corrections and industry choice, and show its first screen."""
+    details, stored = load_case(case_id)
+    start_over({**details, "documents": stored}, case_id)
+    progress = load_progress(case_id)
+    if progress:
+        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"])
+        if progress["choice"]:
+            st.session_state.choice = progress["choice"]
+    st.rerun()
+
+
 def draft_label(draft: dict) -> str:
     saved_at = draft["saved_at"].replace("T", " ")[:16]
-    return (f"{draft['entity_name'] or 'Unnamed entity'} · {draft['documents']} documents · saved {saved_at}")
+    return (f"{draft['review_id']} · {draft['entity_name'] or 'Unnamed entity'} · {draft['documents']} documents · "
+            f"saved {saved_at}")
 
 
 if st.session_state.get("screen", "details") == "details":
-    drafts = list_cases()
+    drafts = latest_reviews()  # one per legal entity
     if drafts or st.session_state.get("case_id"):
         with st.container(border=True):
             st.subheader(":material/folder_open: Your saved reviews")
             if st.session_state.get("case_id"):
-                st.caption(f"You are working on a saved review: {saved.get('entity_name') or 'Unnamed entity'}. "
-                           "Changes are saved when you click Next or Save as draft.")
+                st.caption(f"You are working on saved review **{review_id(st.session_state.case_id)}**: "
+                           f"{saved.get('entity_name') or 'Unnamed entity'}. Changes are saved when you click Next or "
+                           "Save as draft.")
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                typed_id = st.text_input("Find a review by ID", placeholder="e.g. CLR-E9BD2CD5", width="stretch",
+                                         help="Each legal entity's review has its own ID, shown at the top of the "
+                                              "review. Type it to open the latest review of that entity.")
+                if st.button("Find", icon=":material/search:", disabled=not typed_id.strip()):
+                    found = find_by_review_id(typed_id)
+                    if found:
+                        open_review(found)
+                    st.error(f"No saved review has the ID {typed_id.strip().upper()}.", icon=":material/error:")
             with st.container(horizontal=True, vertical_alignment="bottom"):
                 by_id = {d["id"]: d for d in drafts}
                 chosen = st.selectbox("Continue a saved review", list(by_id), format_func=lambda i: draft_label(by_id[i]),
                                       index=None, placeholder="Choose a review", width="stretch") if drafts else None
                 if st.button("Open review", icon=":material/folder_open:", disabled=not chosen):
-                    details, stored = load_case(chosen)
-                    start_over({**details, "documents": stored}, chosen)
-                    progress = load_progress(chosen)  # label corrections and industry choice, if saved
-                    if progress:
-                        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"])
-                        if progress["choice"]:
-                            st.session_state.choice = progress["choice"]
-                    st.rerun()
+                    open_review(chosen)
                 if st.button("Start a new review", icon=":material/add:"):
                     start_over({}, None)
                     st.rerun()
@@ -307,6 +324,15 @@ if st.session_state.get("screen", "details") == "details":
             help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
         )
         show_fca_firm(fca_frn, company_link)
+        existing = find_case({"entity_name": entity_name, "company_link": company_link})
+        if existing and existing["id"] != st.session_state.get("case_id"):
+            with st.container(border=True):
+                st.warning(
+                    f"A saved review already exists for {existing['entity_name'] or 'this entity'} "
+                    f"({draft_label(existing)}). Each legal entity has one review, so saving this one will replace "
+                    "it. To add to the saved review instead, open it.", icon=":material/warning:")
+                if st.button("Open the saved review", icon=":material/folder_open:"):
+                    open_review(existing["id"])
 
         source = st.segmented_control(
             "Documents", ["Sample pack", "Upload documents"], default=saved.get("source", "Sample pack"), key="source"
@@ -339,7 +365,8 @@ if st.session_state.get("screen", "details") == "details":
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:"):
             save_draft(details, documents)
-            st.toast("Saved on this computer. Reopen it from Your saved reviews any time.", icon=":material/check_circle:")
+            st.toast(f"Saved on this computer. Its review ID is {review_id(st.session_state.case_id)}: use it to find "
+                     "this review any time.", icon=":material/check_circle:")
         if st.button("Next", type="primary", icon=":material/arrow_forward:", disabled=not documents):
             save_draft(details, documents)  # every review is saved, so it can be reopened and amended later
             st.session_state.screen = "documents"
@@ -392,7 +419,8 @@ with st.container(border=True):
                ("Documents", f"{len(documents)} files")]
     st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
     if st.session_state.get("case_id"):
-        st.caption(":material/cloud_done: Saved on this computer. You can close Clario and reopen this review from "
+        st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · "
+                   ":material/cloud_done: Saved on this computer. You can close Clario and reopen this review from "
                    "Your saved reviews on the Review page.")
 st.caption(f"Step {SCREENS.index(screen) + 1} of {len(SCREENS)}")
 

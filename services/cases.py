@@ -7,10 +7,13 @@ hold client documents and must not be committed.
 
 import json
 import secrets
+import shutil
 from datetime import datetime
 from pathlib import Path
 
+from services.companies_house import parse_company_number
 from services.pack import DocumentLabel, UploadedDocument
+from services.validator import normalise_company_name
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
 DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn")
@@ -61,6 +64,75 @@ def load_case(case_id: str, folder: Path | None = None) -> tuple[dict, list[Uplo
     return record["details"], documents
 
 
+REVIEW_ID_PREFIX = "CLR-"
+
+
+def review_id(case_id: str) -> str:
+    """The review's ID for people to type, e.g. CLR-E9BD2CD5. It never changes, however often the review is saved."""
+    return REVIEW_ID_PREFIX + case_id.split("-")[-1].upper()
+
+
+def latest_reviews(folder: Path | None = None) -> list[dict]:
+    """One saved review per legal entity (its most recent), most recently saved first. This is what people see."""
+    seen, reviews = set(), []
+    for draft in list_cases(folder):
+        key = draft["entity_key"] or draft["id"]  # a review with no name or number stands on its own
+        if key not in seen:
+            seen.add(key)
+            reviews.append(draft)
+    return reviews
+
+
+def remove_duplicates(folder: Path | None = None) -> list[str]:
+    """Delete older saved reviews of an entity that has a newer one. Returns the ids removed."""
+    keep = {d["id"] for d in latest_reviews(folder)}
+    removed = [d["id"] for d in list_cases(folder) if d["id"] not in keep]
+    for case_id in removed:
+        shutil.rmtree(_folder(case_id, folder))
+    return removed
+
+
+def find_by_review_id(text: str, folder: Path | None = None) -> str | None:
+    """The saved review with this ID (typed with or without CLR-, in any capitals), or None if there isn't one."""
+    wanted = "".join(text.split()).upper().removeprefix(REVIEW_ID_PREFIX.upper()).removeprefix("CLR")
+    for draft in list_cases(folder):
+        if review_id(draft["id"]) == REVIEW_ID_PREFIX + wanted:
+            return draft["id"]
+    return None
+
+
+def entity_key(details: dict) -> str:
+    """What identifies the legal entity: its company number, or else its name ("" if neither is given)."""
+    number = parse_company_number(details.get("company_link", ""))
+    if number:
+        return f"company:{number}"
+    name = normalise_company_name(details.get("entity_name", ""))
+    return f"name:{name}" if name else ""
+
+
+def find_case(details: dict, folder: Path | None = None) -> dict | None:
+    """The saved review for this legal entity, if there is one (the most recent, if older duplicates exist)."""
+    key = entity_key(details)
+    matches = [d for d in list_cases(folder) if key and d["entity_key"] == key]
+    return matches[0] if matches else None
+
+
+def save_review(case_id: str | None, details: dict, documents: list[UploadedDocument],
+                folder: Path | None = None) -> str:
+    """Save the review, keeping one review per legal entity: it replaces any other saved review for the same entity.
+
+    Returns the review's id: the one given, else the entity's existing review, else a new one.
+    """
+    key = entity_key(details)
+    same_entity = [d["id"] for d in list_cases(folder) if key and d["entity_key"] == key]
+    case_id = case_id or (same_entity[0] if same_entity else new_case_id())
+    save_case(case_id, details, documents, folder)
+    for other in same_entity:
+        if other != case_id:
+            shutil.rmtree(_folder(other, folder))  # an older review of the same entity, now replaced
+    return case_id
+
+
 def list_cases(folder: Path | None = None) -> list[dict]:
     """Every saved draft, most recently saved first: id, entity name, company, number of documents, saved at."""
     drafts = []
@@ -68,7 +140,9 @@ def list_cases(folder: Path | None = None) -> list[dict]:
         record = json.loads(case_file.read_text())
         drafts.append({
             "id": case_file.parent.name,
+            "review_id": review_id(case_file.parent.name),
             "entity_name": record["details"].get("entity_name", ""),
+            "entity_key": entity_key(record["details"]),
             "company_link": record["details"].get("company_link", ""),
             "documents": len(record["documents"]),
             "saved_at": record["saved_at"],

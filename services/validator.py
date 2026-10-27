@@ -111,7 +111,8 @@ def _months_before(day: date, months: int) -> date:
     return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
-def _normalise_company_name(name: str) -> str:
+def normalise_company_name(name: str) -> str:
+    """A company name in a standard form: capitals, no punctuation, single spaces, LTD and PLC."""
     name = re.sub(r"[^\w\s]", " ", name.upper().replace("&", " AND "))
     name = " ".join(name.split())
     name = re.sub(r"\bPUBLIC LIMITED COMPANY\b", "PLC", name)
@@ -120,7 +121,7 @@ def _normalise_company_name(name: str) -> str:
 
 def _same_company_name(a: str, b: str) -> bool:
     """True if two names differ only in capitals, punctuation, spacing, or LIMITED/LTD and PLC wording."""
-    return _normalise_company_name(a) == _normalise_company_name(b)
+    return normalise_company_name(a) == normalise_company_name(b)
 
 
 def entity_name_matches(entered: str, registered: str) -> bool:
