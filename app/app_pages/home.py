@@ -67,6 +67,9 @@ cards([
      "or the FCA register."),
     (":material/rate_review:", "4. Supports your review",
      "Gives findings with document and page references, so a reviewer can validate them and decide the next steps."),
+    (":material/speed:", "5. Suggests a risk rating",
+     "Rates customer, product, geography and delivery channel risk against your methodology, and flags enhanced due "
+     "diligence triggers, for the reviewer to confirm."),
 ])
 
 # --- What you'll get ---
@@ -78,12 +81,15 @@ cards([
     (":material/link:", "Evidence references", "The document, page and quote behind each finding."),
     (":material/checklist:", "Recommended follow-ups",
      "What to request from the client and what to check on public registers."),
+    (":material/speed:", "Suggested risk rating",
+     "Low, Medium or High, with the reasons and evidence for each factor."),
 ])
 
 # --- Review, verification and decision ---
 
 st.header("Review, verification and decision")
-st.caption("Clario helps with the first and supports the second. The third is always yours.")
+st.caption("Clario does the first, supports the second, and suggests a risk rating for the third. The decision "
+           "is always yours.")
 cards([
     (":material/smart_toy:", "Document review: what Clario does",
      "Extracts and organises information from the documents supplied, checks it against Companies House and the "
@@ -92,8 +98,8 @@ cards([
      "Establishing whether information is supported by reliable evidence and, where necessary, independent sources. "
      "Clario points to the evidence; a reviewer confirms it."),
     (":material/gavel:", "KYC decision: what your firm determines",
-     "Assessing the client's risk and deciding whether onboarding, further due diligence or escalation is "
-     "appropriate."),
+     "Confirming the client's risk rating and deciding whether onboarding, further due diligence or escalation is "
+     "appropriate. Clario suggests a rating; the reviewer, and senior management for high risk, decide."),
 ])
 
 # --- More detail ---
@@ -111,7 +117,8 @@ with right.container(border=True):
     st.markdown(
         "- It doesn't verify that a document is authentic.\n"
         "- It doesn't run sanctions, PEP or adverse media screening.\n"
-        "- It doesn't rate risk or approve a client."
+        "- It doesn't make the risk decision or approve a client: it suggests a rating for the reviewer to "
+        "confirm."
     )
 
 with st.container(border=True):

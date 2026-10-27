@@ -6,7 +6,8 @@ Clario reviews a company's KYC (know your customer) pack the way an onboarding a
 2. **identifies each document** (certificate of incorporation, proof of address, shareholder register and so on);
 3. **works out the industry** from the questionnaire, the official industry codes and the FCA register, and **picks the matching checklist**;
 4. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
-5. lets **an analyst confirm or override** any result, with the reason recorded beside the original answer.
+5. lets **an analyst validate the checklist line by line**, confirming or overriding each result;
+6. **suggests a risk rating** (Low, Medium or High) from the results, using the firm's risk methodology, for the analyst to confirm.
 
 The output is the "request from client" list and the "check on public registers" list an analyst would otherwise build by hand.
 
@@ -45,6 +46,7 @@ Company website ──────────┘  Claude: evidence for every ch
 - **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
 - **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, every permission, requirements, disciplinary history and approved individuals). The page warns straight away if the FCA's record links the firm to a different company number.
 - **Drafts.** A review can be saved as a draft and continued later: add or remove documents, edit details, and pick up where you left off. Claude's answers are kept with the draft, so reopening it costs nothing.
+- **Risk rating.** Claude rates customer, product, geography and delivery channel risk against a methodology spreadsheet (`docs/UK_KYC_Risk_Methodology.xlsx`, a draft for compliance review) and flags enhanced due diligence triggers, with evidence. Fixed rules combine them: any trigger means High, otherwise the highest factor wins. The analyst confirms or changes the rating with a reason; High needs senior management approval. Clario never approves or declines a client.
 - **Line-by-line validation.** The analyst ticks each checklist line as validated, or changes its status with a required note. Every line records who validated it and when, keeps the original answer, can be undone, and is saved on the analyst's own machine.
 
 ## Design choices
@@ -61,7 +63,8 @@ Company website ──────────┘  Claude: evidence for every ch
 | Identify the documents (8 files) | about $0.09 |
 | Suggest the industry | about $0.03 |
 | Map the evidence to the checklist | about $0.21 |
-| **Total** | **about $0.33 (roughly 26p)** |
+| Suggest a risk rating | about $0.07 |
+| **Total** | **about $0.40 (roughly 32p)** |
 
 Companies House and FCA register lookups are free. The sample pack replays saved answers and costs nothing.
 
@@ -95,6 +98,7 @@ The sample pack needs the Companies House and FCA keys (both free) but no Anthro
 | `services/industry.py` | Industry suggestion and the industry-to-checklist link |
 | `services/validator.py` | The fixed rules for the legal-existence checks |
 | `services/companies_house.py`, `services/fca.py`, `services/website.py` | Live sources |
+| `services/risk.py` | Risk rating: the methodology, Claude's factor ratings and the fixed rules |
 | `services/reviews.py` | Analyst overrides, saved per case |
 | `services/cases.py` | Draft reviews: details, documents and saved answers |
 | `services/extractor.py` | Calls to Claude, saved answers and cost |
@@ -105,7 +109,7 @@ The sample pack needs the Companies House and FCA keys (both free) but no Anthro
 
 ## Limits
 
-Clario supports a KYC review and does not replace one. It does not run sanctions, PEP or adverse media screening (those checks are left as "Not started" for a screening tool), and it does not make the risk decision. It is not legal advice.
+Clario supports a KYC review and does not replace one. It does not run sanctions, PEP or adverse media screening (those checks are left as "Not started" for a screening tool), and it suggests, but does not make, the risk decision. It is not legal advice.
 
 ## Built with
 

@@ -63,7 +63,7 @@ def test_draft_names_cannot_point_elsewhere(tmp_path):
 def test_answers_are_kept_inside_the_draft(tmp_path):
     case_id = new_case_id()
     paths = answer_paths(case_id, folder=tmp_path)
-    assert set(paths) == {"labels", "industry", "assessment"}
+    assert set(paths) == {"labels", "industry", "assessment", "risk"}
     assert all(p.parent == tmp_path / case_id for p in paths.values())
 
 

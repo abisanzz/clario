@@ -153,7 +153,7 @@ def list_cases(folder: Path | None = None) -> list[dict]:
 def answer_paths(case_id: str, folder: Path | None = None) -> dict[str, Path]:
     """Where a draft keeps Claude's answers, so reopening it with the same documents costs nothing."""
     path = _folder(case_id, folder)
-    return {kind: path / f"{kind}.answer.json" for kind in ("labels", "industry", "assessment")}
+    return {kind: path / f"{kind}.answer.json" for kind in ("labels", "industry", "assessment", "risk")}
 
 
 def save_progress(case_id: str, pack_key: str, labels: list[DocumentLabel] | None, choice: tuple[str, str] | None,

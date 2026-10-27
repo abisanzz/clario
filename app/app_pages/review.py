@@ -55,6 +55,14 @@ from services.reviews import (  # noqa: E402
     remove_override,
     save_line_reviews,
 )
+from services.risk import (  # noqa: E402
+    NOT_ENOUGH,
+    RATINGS,
+    load_risk_decision,
+    results_text,
+    save_risk_decision,
+    suggest_risk,
+)
 from services.validator import Status, entity_name_matches  # noqa: E402
 from services.website import WebsiteFetchFailed, website_text  # noqa: E402
 
@@ -65,6 +73,7 @@ SAMPLE_ANSWERS = {
     "labels": SAMPLES / "pack_labels.answer.json",
     "industry": SAMPLES / "pack_industry.answer.json",
     "assessment": SAMPLES / "pack_assessment.answer.json",
+    "risk": SAMPLES / "pack_risk.answer.json",
 }
 SAMPLE_ENTITY_NAME = "EXAMPLE PAYMENTS LTD"
 SAMPLE_COMPANY_NUMBER = "99999901"
@@ -388,7 +397,7 @@ if st.session_state.get("screen", "details") == "details":
 
 # --- Screens 2 to 5: the checks, using the saved details ---
 
-SCREENS = ["details", "documents", "industry", "results"]
+SCREENS = ["details", "documents", "industry", "results", "risk"]
 screen = st.session_state.screen if st.session_state.get("screen") in SCREENS else "documents"
 
 source = saved["source"]
@@ -589,6 +598,91 @@ overrides = load_overrides(review_path)
 named = apply_entity_name(original, entity_name, parse_company_number(company_link), lookup=cached_company)
 result = apply_overrides(named, overrides)
 
+# --- Screen 5: risk rating. Claude rates each factor from the results; fixed rules combine them ---
+
+RATING_COLOURS = {"Low": "green", "Medium": "orange", "High": "red", NOT_ENOUGH: "gray"}
+
+if screen == "risk":
+    sources, _ = fetch_links(company_link, website, fca_frn)
+    risk_input = (results_text(result, INDUSTRIES[industry], CHECKLISTS[checklist][0]), tuple(sources))
+    if st.session_state.get("risk", (None,))[0] != risk_input:  # rate straight away, and again if the results changed
+        with st.spinner("Claude is rating the risk factors from the checklist results and registers..."):
+            try:
+                st.session_state.risk = (risk_input, suggest_risk(
+                    result, INDUSTRIES[industry], CHECKLISTS[checklist][0], sources,
+                    saved_answer=saved_answers.get("risk"), update_saved=source != "Sample pack" or not overrides))
+            except ExtractionFailed as error:
+                st.error(f"Could not suggest a risk rating: {error}", icon=":material/error:")
+                st.button("Try again", icon=":material/refresh:")
+                navigation()
+                st.stop()
+    risk = st.session_state.risk[1]
+
+    st.header("Risk rating")
+    st.caption("Clario suggests a rating using the firm's risk methodology. You confirm or change it.")
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.metric("Suggested overall rating", risk.overall, border=True, width="content")
+        st.markdown(f"**Why:** {risk.why}.  \nRules: any EDD trigger makes it High; otherwise the highest factor wins; "
+                    "a factor without enough evidence counts as Medium.")
+    for found in risk.triggers:
+        st.warning(f"**EDD trigger {found.trigger.id}: {found.trigger.text}** ({found.trigger.kind})  \n"
+                   f"{found.reasons}" + "".join(f"  \n> {quote}" for quote in found.evidence),
+                   icon=":material/priority_high:")
+    if risk.flagged:
+        st.info("Not enough evidence for: " + ", ".join(f.factor.name for f in risk.flagged)
+                + ". Counted as Medium; check these yourself.", icon=":material/help:")
+
+    with st.container(horizontal=True):
+        for rated in risk.factors:
+            with st.container(border=True):
+                st.markdown(f"**{rated.factor.name}**")
+                st.badge(rated.rating, color=RATING_COLOURS[rated.rating])
+                st.caption(rated.reasons)
+                if rated.evidence:
+                    with st.expander("Evidence"):
+                        st.markdown("\n".join(f"- {quote}" for quote in rated.evidence))
+    st.caption("Risk rating: replayed, $0.00" if risk.replayed else f"Risk rating: about ${risk.cost_usd:.3f}")
+
+    decision_path = review_path.with_name(review_path.stem + "-risk.json")
+    decision = load_risk_decision(decision_path)
+    with st.container(border=True):
+        st.subheader(":material/gavel: Your decision")
+        if decision:
+            text = (f"Final rating **{decision.rating}** by {decision.reviewer} on {decision.decided_on}"
+                    + (f" (Clario suggested {decision.suggested})" if decision.suggested != decision.rating else "")
+                    + (f": {decision.reason}" if decision.reason else "."))
+            if decision.awaiting_approval:
+                st.warning(text + "  \n**Awaiting senior management approval** before onboarding.",
+                           icon=":material/hourglass_top:")
+            elif decision.rating == "High":
+                st.success(text + f"  \nApproved by {decision.senior_approver}.", icon=":material/verified:")
+            else:
+                st.success(text, icon=":material/check_circle:")
+            if decision.suggested != risk.overall:
+                st.caption(f":material/info: Clario now suggests {risk.overall}; review your decision.")
+        with st.form("risk_decision"):
+            final = st.segmented_control("Final rating", RATINGS, required=True,
+                                         default=decision.rating if decision else risk.overall)
+            reason = st.text_area("Reason", value=decision.reason if decision else "",
+                                  help="Required if your rating differs from Clario's suggestion.")
+            reviewer = st.text_input("Reviewer", value=decision.reviewer if decision
+                                     else st.session_state.get("last_reviewer", ""))
+            approver = st.text_input("Senior management approval (for High risk)",
+                                     value=decision.senior_approver if decision else "",
+                                     help="Name of the senior manager who approved onboarding (checklist 7.3). "
+                                          "Leave empty until approval is given.")
+            if st.form_submit_button("Save decision", type="primary", icon=":material/save:"):
+                try:
+                    save_risk_decision(decision_path, final, risk.overall, reason, reviewer, approver)
+                except ValueError as error:
+                    st.error(str(error), icon=":material/error:")
+                else:
+                    st.session_state.last_reviewer = reviewer.strip()
+                    st.rerun()
+    navigation()
+    st.caption("Clario suggests, and does not make, the risk decision. Not legal advice.")
+    st.stop()
+
 st.header("Results")
 st.caption(
     f"Industry: {INDUSTRIES[industry]}. Checklist: {CHECKLISTS[checklist][0]} ({len(result.outcomes)} checks)"
@@ -715,7 +809,10 @@ if overrides:
                 st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
                           on_click=remove_override, args=(review_path, change.check_id))
 
-navigation()
+navigation("Next: risk rating")
+if source == "Upload documents":
+    st.caption("Next asks Claude to suggest a risk rating from these results (roughly 5p). A reopened review with "
+               "unchanged results costs nothing.")
 st.caption(
     "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "
     "Not legal advice."
