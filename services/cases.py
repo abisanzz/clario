@@ -31,7 +31,8 @@ def _folder(case_id: str, folder: Path | None) -> Path:
 
 
 def save_case(case_id: str, details: dict, documents: list[UploadedDocument], folder: Path | None = None) -> None:
-    """Save (or update) a draft: its details and exactly these documents."""
+    """Save (or update) a draft: its details and exactly these documents. Supporting documents added during the
+    review are kept."""
     path = _folder(case_id, folder)
     stored = path / "documents"
     stored.mkdir(parents=True, exist_ok=True)
@@ -39,13 +40,17 @@ def save_case(case_id: str, details: dict, documents: list[UploadedDocument], fo
         target = stored / document.fingerprint
         if not target.exists():
             target.write_bytes(document.data)
-    keep = {d.fingerprint for d in documents}
+    case_json = path / "case.json"
+    supporting = json.loads(case_json.read_text()).get("supporting", []) if case_json.exists() else []
+    keep = {d.fingerprint for d in documents} | {s["sha256"] for s in supporting}
     for old in stored.iterdir():
         if old.name not in keep:
             old.unlink()  # a document removed from the review
     record = {
         "details": {field: details.get(field, "") for field in DETAIL_FIELDS},
-        "documents": [{"name": d.name, "media_type": d.media_type, "sha256": d.fingerprint} for d in documents],
+        "documents": [{"name": d.name, "media_type": d.media_type, "sha256": d.fingerprint,
+                       "description": d.description} for d in documents],
+        "supporting": supporting,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
     }
     temporary = path / "case.json.tmp"
@@ -58,7 +63,8 @@ def load_case(case_id: str, folder: Path | None = None) -> tuple[dict, list[Uplo
     path = _folder(case_id, folder)
     record = json.loads((path / "case.json").read_text())
     documents = [
-        UploadedDocument(d["name"], (path / "documents" / d["sha256"]).read_bytes(), d["media_type"])
+        UploadedDocument(d["name"], (path / "documents" / d["sha256"]).read_bytes(), d["media_type"],
+                         d.get("description", ""))
         for d in record["documents"]
     ]
     return record["details"], documents
@@ -185,3 +191,45 @@ def load_progress(case_id: str, folder: Path | None = None) -> dict:
         "labels": [DocumentLabel(*item) for item in record["labels"]],
         "choice": tuple(record["choice"]) if record["choice"] else None,
     }
+
+
+def add_supporting_document(case_id: str, document: UploadedDocument, check_id: str, added_by: str = "",
+                            folder: Path | None = None, verdict: str = "", verdict_finding: str = "",
+                            description: str = "") -> None:
+    """Add a document uploaded during the review (to back up a checklist line) to the review's document store."""
+    path = _folder(case_id, folder)
+    record = json.loads((path / "case.json").read_text())
+    (path / "documents").mkdir(exist_ok=True)
+    (path / "documents" / document.fingerprint).write_bytes(document.data)
+    supporting = [s for s in record.get("supporting", []) if s["sha256"] != document.fingerprint]
+    supporting.append({"name": document.name, "media_type": document.media_type, "sha256": document.fingerprint,
+                       "check_id": check_id, "added_by": added_by.strip(),
+                       "added_on": datetime.now().date().isoformat(),
+                       "verdict": verdict, "verdict_finding": verdict_finding, "description": description.strip()})
+    record["supporting"] = supporting
+    temporary = path / "case.json.tmp"
+    temporary.write_text(json.dumps(record, indent=2))
+    temporary.replace(path / "case.json")
+
+
+def load_supporting(case_id: str, folder: Path | None = None) -> list[tuple[UploadedDocument, dict]]:
+    """Documents added during the review, each with its record: the check it supports, who added it and when."""
+    path = _folder(case_id, folder)
+    if not (path / "case.json").exists():
+        return []
+    record = json.loads((path / "case.json").read_text())
+    return [(UploadedDocument(s["name"], (path / "documents" / s["sha256"]).read_bytes(), s["media_type"]), s)
+            for s in record.get("supporting", [])]
+
+
+def remove_supporting_document(case_id: str, sha256: str, folder: Path | None = None) -> None:
+    """Delete a supporting document from the review's document store."""
+    path = _folder(case_id, folder)
+    record = json.loads((path / "case.json").read_text())
+    record["supporting"] = [s for s in record.get("supporting", []) if s["sha256"] != sha256]
+    still_used = {d["sha256"] for d in record["documents"]}
+    if sha256 not in still_used:
+        (path / "documents" / sha256).unlink(missing_ok=True)
+    temporary = path / "case.json.tmp"
+    temporary.write_text(json.dumps(record, indent=2))
+    temporary.replace(path / "case.json")

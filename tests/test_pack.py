@@ -103,3 +103,14 @@ def test_fingerprint_changes_with_contents_names_and_order():
     assert pack_fingerprint(list(reversed(PACK))) != base
     assert pack_fingerprint([UploadedDocument("renamed.pdf", PACK[0].data)] + PACK[1:]) != base
     assert pack_fingerprint([UploadedDocument("scan_001.pdf", b"changed")] + PACK[1:]) != base
+
+
+def test_the_analysts_description_goes_with_the_file():
+    described = UploadedDocument("scan_002.pdf", b"%PDF register", description="Register of members, Oct 2026")
+    claude = FakeClaude(GOOD)
+    identify_documents([PACK[0], described, PACK[2]], client=claude)
+    content = claude.requests[0]["messages"][0]["content"]
+    assert content[2] == {"type": "text",
+                          "text": "File 2: scan_002.pdf (the analyst says it shows: Register of members, Oct 2026)"}
+    assert "treat that as a hint, but decide from the file itself" in claude.requests[0]["system"]
+    assert pack_fingerprint([described]) != pack_fingerprint([UploadedDocument("scan_002.pdf", b"%PDF register")])

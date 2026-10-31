@@ -316,3 +316,13 @@ def test_entity_name_not_compared_leaves_the_status_alone():
     assert outcome(named, "1.1").status is Status.PRESENT
     assert "not compared" in outcome(named, "1.1").finding
     assert apply_entity_name(result, "  ", "99999901") is result  # nothing entered, nothing changed
+
+
+def test_a_section_can_be_re_run_on_its_own():
+    section_3 = {c.id for c in CHECKS if c.section == "3. Ownership and control"}
+    claude = FakeClaude({"checks": [], "facts": FACTS})
+    result = assess_pack(DOCS, LABELS, LINKS, client=claude, company_lookup=active_company, today=TODAY,
+                         only=section_3)
+    assert {o.check.id for o in result.outcomes} == section_3
+    text = claude.requests[0]["messages"][0]["content"][-1]["text"]
+    assert "3.1 [3. Ownership and control]" in text and "5.1 [5." not in text

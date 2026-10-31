@@ -49,7 +49,7 @@ def test_results_follow_the_analyst(path):
 
 
 def test_a_reason_and_a_reviewer_are_required(path):
-    with pytest.raises(ValueError, match="reason"):
+    with pytest.raises(ValueError, match="comment"):
         change(path, note="  ")
     with pytest.raises(ValueError, match="reviewer"):
         change(path, reviewer="")
@@ -91,7 +91,7 @@ def test_changing_a_status_in_the_table_needs_a_note_and_saves_nothing_until_it_
     from services.reviews import save_line_reviews
     lines = [("3.1", Status.MISSING, "", True), ("3.2", Status.PRESENT, "", True)]
     assert save_line_reviews(path, ASSESSMENT, lines, "A. Analyst", today=TODAY) == [
-        "3.2: give a reason for changing the status to Present"]
+        "3.2: add a comment explaining why you changed the status to Present"]
     assert load_overrides(path) == {}  # nothing saved, not even the valid line
     lines[1] = ("3.2", Status.PRESENT, "Client confirmed 25%", True)
     assert save_line_reviews(path, ASSESSMENT, lines, "A. Analyst", today=TODAY) == []

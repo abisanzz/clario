@@ -29,10 +29,11 @@ class Override:
     original_finding: str
     original_decided_by: str
     validated: bool = False  # the analyst has checked this line
+    via: str = ""  # set when Claude changed the line from a supporting document: that document's name
 
     def __post_init__(self):
         if self.status is not self.original_status and not self.note.strip():
-            raise ValueError("Give a reason for the change")
+            raise ValueError("Add a comment explaining the change")
         if not self.reviewer.strip():
             raise ValueError("Give the reviewer's name")
 
@@ -67,11 +68,11 @@ def _write(path: Path, overrides: dict[str, Override]) -> None:
 
 
 def save_override(path: Path, assessment: PackAssessment, check_id: str, status: Status, note: str,
-                  reviewer: str, today: date | None = None, validated: bool = False) -> Override:
+                  reviewer: str, today: date | None = None, validated: bool = False, via: str = "") -> Override:
     """Record the analyst's answer for one check, keeping the original answer beside it."""
     original = next(o for o in assessment.outcomes if o.check.id == check_id)
     override = Override(check_id, status, note.strip(), reviewer.strip(), (today or date.today()).isoformat(),
-                        original.status, original.finding, original.decided_by, validated)
+                        original.status, original.finding, original.decided_by, validated, via)
     overrides = load_overrides(path)
     overrides[check_id] = override
     _write(path, overrides)
@@ -91,7 +92,7 @@ def save_line_reviews(path: Path, assessment: PackAssessment, lines: list[tuple[
         problems.append("Give the reviewer's name")
     for check_id, status, note, _ in lines:
         if status is not originals[check_id].status and not note.strip():
-            problems.append(f"{check_id}: give a reason for changing the status to {status.value}")
+            problems.append(f"{check_id}: add a comment explaining why you changed the status to {status.value}")
     if problems:
         return problems
     for check_id, status, note, validated in lines:
@@ -121,7 +122,8 @@ def apply_overrides(assessment: PackAssessment, overrides: dict[str, Override]) 
                 changes.update(
                     status=override.status,
                     finding=override.note,
-                    decided_by=f"Analyst: {who}",
+                    decided_by=(f"Claude, from supporting document {override.via}, {override.reviewed_on}"
+                                if override.via else f"Analyst: {who}"),
                     before_review=f"{outcome.status.value} ({outcome.decided_by}): {outcome.finding}",
                 )
             outcome = replace(outcome, **changes)

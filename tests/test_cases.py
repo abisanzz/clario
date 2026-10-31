@@ -149,3 +149,37 @@ def test_only_the_latest_review_of_each_entity_is_shown_and_older_ones_can_be_re
     assert remove_duplicates(folder=tmp_path) == ["20261027-aaaaaaaa"]
     assert not (tmp_path / "20261027-aaaaaaaa").exists()
     assert len(list_cases(folder=tmp_path)) == 2
+
+
+def test_supporting_documents_join_the_document_store_and_survive_resaving(tmp_path):
+    from services.cases import add_supporting_document, load_supporting
+    case_id = new_case_id()
+    save_case(case_id, DETAILS, [CERT], folder=tmp_path)
+    wealth = UploadedDocument("source_of_wealth.pdf", b"%PDF wealth")
+    add_supporting_document(case_id, wealth, "3.6", "A. Analyst", folder=tmp_path)
+    [(document, record)] = load_supporting(case_id, folder=tmp_path)
+    assert document == wealth
+    assert (record["check_id"], record["added_by"]) == ("3.6", "A. Analyst")
+    save_case(case_id, {**DETAILS, "website": "example.com"}, [CERT, BILL], folder=tmp_path)  # details re-saved
+    assert [d.name for d, _ in load_supporting(case_id, folder=tmp_path)] == ["source_of_wealth.pdf"]
+    assert (tmp_path / case_id / "documents" / wealth.fingerprint).exists()
+    assert [d.name for d in load_case(case_id, folder=tmp_path)[1]] == ["cert.pdf", "bill.pdf"]
+
+
+def test_document_descriptions_are_kept_with_the_draft(tmp_path):
+    case_id = new_case_id()
+    described = UploadedDocument("cert.pdf", b"%PDF cert", description="Certificate of incorporation, 2019")
+    save_case(case_id, DETAILS, [described], folder=tmp_path)
+    assert load_case(case_id, folder=tmp_path)[1][0].description == "Certificate of incorporation, 2019"
+
+
+def test_a_supporting_document_can_be_deleted(tmp_path):
+    from services.cases import add_supporting_document, load_supporting, remove_supporting_document
+    case_id = new_case_id()
+    save_case(case_id, DETAILS, [CERT], folder=tmp_path)
+    wealth = UploadedDocument("source_of_wealth.pdf", b"%PDF wealth")
+    add_supporting_document(case_id, wealth, "3.6", folder=tmp_path)
+    remove_supporting_document(case_id, wealth.fingerprint, folder=tmp_path)
+    assert load_supporting(case_id, folder=tmp_path) == []
+    assert not (tmp_path / case_id / "documents" / wealth.fingerprint).exists()
+    assert (tmp_path / case_id / "documents" / CERT.fingerprint).exists()  # the original documents stay
