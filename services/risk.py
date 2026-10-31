@@ -223,13 +223,13 @@ class RiskDecision:
 
 def save_risk_decision(path: Path, rating: str, suggested: str, reason: str, reviewer: str,
                        senior_approver: str = "", today: date | None = None) -> RiskDecision:
-    """Record the analyst's final rating. A different rating from the suggestion needs a reason."""
+    """Record the final rating. Overriding the suggestion needs a sign-off: a reason and the reviewer's name."""
     if rating not in RATINGS:
         raise ValueError(f"Choose a rating: {', '.join(RATINGS)}")
     if rating != suggested and not reason.strip():
         raise ValueError(f"Give a reason for rating {rating} when Clario suggested {suggested}")
-    if not reviewer.strip():
-        raise ValueError("Give the reviewer's name")
+    if rating != suggested and not reviewer.strip():
+        raise ValueError("Give the reviewer's name to sign off the override")
     decision = RiskDecision(rating, suggested, reason.strip(), reviewer.strip(), (today or date.today()).isoformat(),
                             senior_approver.strip())
     path.parent.mkdir(exist_ok=True)

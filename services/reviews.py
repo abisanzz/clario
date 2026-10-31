@@ -127,3 +127,30 @@ def apply_overrides(assessment: PackAssessment, overrides: dict[str, Override]) 
             outcome = replace(outcome, **changes)
         outcomes.append(outcome)
     return replace(assessment, outcomes=outcomes)
+
+
+# --- Final approval: senior management signs off every review at the end ---
+
+@dataclass(frozen=True)
+class FinalApproval:
+    approver: str
+    approved_on: str  # YYYY-MM-DD
+    note: str = ""
+
+
+def approve_review(path: Path, approver: str, note: str = "", today: date | None = None) -> FinalApproval:
+    """Record senior management's approval of the whole review."""
+    if not approver.strip():
+        raise ValueError("Give the senior manager's name")
+    approval = FinalApproval(approver.strip(), (today or date.today()).isoformat(), note.strip())
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(asdict(approval), indent=2))
+    return approval
+
+
+def load_approval(path: Path) -> FinalApproval | None:
+    return FinalApproval(**json.loads(path.read_text())) if path.exists() else None
+
+
+def withdraw_approval(path: Path) -> None:
+    path.unlink(missing_ok=True)

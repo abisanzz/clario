@@ -99,7 +99,7 @@ cards([
      "Clario points to the evidence; a reviewer confirms it."),
     (":material/gavel:", "KYC decision: what your firm determines",
      "Confirming the client's risk rating and deciding whether onboarding, further due diligence or escalation is "
-     "appropriate. Clario suggests a rating; the reviewer, and senior management for high risk, decide."),
+     "appropriate. Clario suggests a rating; the reviewer confirms it, and senior management gives final approval."),
 ])
 
 # --- More detail ---

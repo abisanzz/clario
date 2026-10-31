@@ -120,3 +120,17 @@ def test_reviews_saved_before_validation_existed_still_load(path):
         "reviewed_on": "2026-10-22", "original_status": "Unclear", "original_finding": "x",
         "original_decided_by": "Claude"}}))
     assert load_overrides(path)["3.2"].validated is False
+
+
+def test_final_approval_is_recorded_and_can_be_withdrawn(tmp_path):
+    from services.reviews import approve_review, load_approval, withdraw_approval
+    path = tmp_path / "approval.json"
+    assert load_approval(path) is None
+    with pytest.raises(ValueError, match="senior manager's name"):
+        approve_review(path, "  ")
+    approve_review(path, "B. Head", "Approved subject to source of wealth evidence", today=TODAY)
+    approval = load_approval(path)
+    assert (approval.approver, approval.approved_on, approval.note) == (
+        "B. Head", "2026-10-22", "Approved subject to source of wealth evidence")
+    withdraw_approval(path)
+    assert load_approval(path) is None

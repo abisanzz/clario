@@ -114,9 +114,15 @@ def test_a_different_rating_needs_a_reason(tmp_path):
     path = tmp_path / "risk-decision.json"
     with pytest.raises(ValueError, match="Give a reason for rating Low when Clario suggested High"):
         save_risk_decision(path, "Low", "High", " ", "A. Analyst")
-    with pytest.raises(ValueError, match="reviewer"):
-        save_risk_decision(path, "High", "High", "", "")
+    with pytest.raises(ValueError, match="reviewer's name to sign off the override"):
+        save_risk_decision(path, "Low", "High", "Client is a listed company", "")
     assert load_risk_decision(path) is None
+
+
+def test_keeping_the_suggestion_needs_no_sign_off(tmp_path):
+    path = tmp_path / "risk-decision.json"
+    decision = save_risk_decision(path, "Medium", "Medium", "", "")
+    assert (decision.rating, decision.reviewer, decision.reason) == ("Medium", "", "")
 
 
 def test_high_risk_waits_for_senior_approval(tmp_path):

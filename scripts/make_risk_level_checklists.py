@@ -1,6 +1,6 @@
 """Draft Low and High risk versions of every industry checklist. The existing checklists are the Medium versions.
 
-Low = simplified due diligence: lighter identity, purpose-only business checks, no source of funds or senior approval,
+Low = simplified due diligence: lighter identity, purpose-only business checks, no source of funds,
 review every 3 years. High = enhanced due diligence: the Medium checks plus source of wealth, extra independent
 verification, documented source of funds, enhanced adverse media, recorded EDD measures and closer monitoring.
 Check IDs stay the same as in the Medium version; added checks take the next free number in their section.
@@ -34,7 +34,7 @@ LEVELS = {
             "5.2": ("Purpose and intended nature of the relationship", None, None),
             "8.1": ("Review date set: every 3 years for a low-risk client", None, None),
         },
-        "remove": {"5.3": "Source of funds", "7.3": "Senior management approval"},
+        "remove": {"5.3": "Source of funds"},
         "add": {},
         "figures": [("Simplified due diligence", "Allowed where the business relationship presents a low risk of money "
                      "laundering, taking the risk assessment into account. Customer and beneficial owner identification "

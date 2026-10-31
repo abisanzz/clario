@@ -84,7 +84,8 @@ RULES = [
     ("Not enough information", "A factor without enough evidence counts as Medium and is flagged for the analyst."),
     ("Analyst confirmation", "The analyst confirms or overrides the suggested rating; an override needs a reason. "
                              "The analyst can also choose a different checklist."),
-    ("High risk", "Needs senior management approval before onboarding (checklist 7.3)."),
+    ("Final approval", "Every review needs senior management approval before onboarding, whatever the rating "
+                       "(checklist 7.3)."),
     ("Review frequency", "Low: every 3 years. Medium: every 2 years. High: every year (checklist 8.1). Firm policy, "
                          "to confirm."),
 ]
@@ -129,7 +130,7 @@ def build() -> Path:
         f"Drafted by Claude on {DRAFTED_ON} from general knowledge of the UK Money Laundering Regulations 2017 and "
         f"common practice, and reviewed on {REVIEWED_ON}. Recheck the references when the regulations change.",
         "",
-        "Scale: Low, Medium, High. High means enhanced due diligence and senior management approval.",
+        "Scale: Low, Medium, High. High means enhanced due diligence. Every review ends with senior management approval.",
         "Before the checklist, Clario suggests a rating for each factor from the ownership and business documents, "
         "the registers and the website, with reasons and evidence; fixed rules combine them as described on the "
         "'How it's decided' tab; the analyst confirms or overrides the result, which sets the checklist level.",
