@@ -102,39 +102,45 @@ def test_saved_answer_replays_free(tmp_path):
 
 # --- The analyst's decision ---
 
-def test_confirming_the_suggestion(tmp_path):
+def test_confirming_the_suggestion_needs_no_sign_off(tmp_path):
     path = tmp_path / "risk-decision.json"
-    save_risk_decision(path, "Medium", "Medium", "", "A. Analyst", today=date(2026, 10, 27))
-    decision = load_risk_decision(path)
-    assert (decision.rating, decision.reviewer, decision.decided_on) == ("Medium", "A. Analyst", "2026-10-27")
-    assert not decision.awaiting_approval
+    decision = save_risk_decision(path, "Medium", "Medium", "", "", today=date(2026, 10, 27))
+    assert (decision.rating, decision.overridden, decision.decided_on) == ("Medium", False, "2026-10-27")
+    assert load_risk_decision(path) == decision
 
 
-def test_a_different_rating_needs_a_reason(tmp_path):
+def test_an_override_needs_a_reason_an_officer_and_evidence(tmp_path):
     path = tmp_path / "risk-decision.json"
     with pytest.raises(ValueError, match="Give a reason for rating Low when Clario suggested High"):
-        save_risk_decision(path, "Low", "High", " ", "A. Analyst")
-    with pytest.raises(ValueError, match="reviewer's name to sign off the override"):
-        save_risk_decision(path, "Low", "High", "Client is a listed company", "")
+        save_risk_decision(path, "Low", "High", " ", "C. Officer", evidence_link="https://share/kyc/123")
+    with pytest.raises(ValueError, match="AML senior officer"):
+        save_risk_decision(path, "Low", "High", "Listed parent", "", evidence_link="https://share/kyc/123")
+    with pytest.raises(ValueError, match="Upload the sign-off document or give a link"):
+        save_risk_decision(path, "Low", "High", "Listed parent", "C. Officer")
     assert load_risk_decision(path) is None
 
 
-def test_keeping_the_suggestion_needs_no_sign_off(tmp_path):
+def test_an_override_with_a_link(tmp_path):
     path = tmp_path / "risk-decision.json"
-    decision = save_risk_decision(path, "Medium", "Medium", "", "")
-    assert (decision.rating, decision.reviewer, decision.reason) == ("Medium", "", "")
+    decision = save_risk_decision(path, "Low", "High", "Listed parent", "C. Officer",
+                                  evidence_link="https://share/kyc/123")
+    assert (decision.overridden, decision.reviewer, decision.evidence_link) == (True, "C. Officer",
+                                                                                "https://share/kyc/123")
 
 
-def test_high_risk_waits_for_senior_approval(tmp_path):
+def test_an_uploaded_sign_off_document_is_kept_and_reused(tmp_path):
+    from services.risk import evidence_path
     path = tmp_path / "risk-decision.json"
-    assert save_risk_decision(path, "High", "High", "", "A. Analyst").awaiting_approval
-    assert not save_risk_decision(path, "High", "High", "", "A. Analyst", senior_approver="B. Head").awaiting_approval
+    save_risk_decision(path, "Low", "High", "Listed parent", "C. Officer", evidence=("sign-off.pdf", b"%PDF signed"))
+    assert evidence_path(path).read_bytes() == b"%PDF signed"
+    again = save_risk_decision(path, "Low", "High", "Listed parent, confirmed", "C. Officer")  # no new upload
+    assert again.evidence_document == "sign-off.pdf" and evidence_path(path).exists()
+    save_risk_decision(path, "High", "High", "", "")  # override removed: the evidence goes too
+    assert not evidence_path(path).exists() and load_risk_decision(path).evidence_document == ""
 
 
-def test_the_sample_answer_is_never_replaced(tmp_path):
-    saved = tmp_path / "risk.json"
-    run(reply(), saved_answer=saved)
-    before = saved.read_text()
-    claude = FakeClaude(reply())  # a different industry, so a fresh answer is needed
-    suggest_risk(DOCS, LABELS, "Lending", LINKS, client=claude, saved_answer=saved, update_saved=False)
-    assert len(claude.requests) == 1 and saved.read_text() == before
+def test_the_uploaded_file_name_never_decides_where_it_is_saved(tmp_path):
+    from services.risk import evidence_path
+    path = tmp_path / "risk-decision.json"
+    save_risk_decision(path, "Low", "High", "x", "C. Officer", evidence=("../../outside.pdf", b"%PDF"))
+    assert evidence_path(path).parent == tmp_path and not (tmp_path.parent.parent / "outside.pdf").exists()

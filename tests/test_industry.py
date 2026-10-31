@@ -50,7 +50,8 @@ def test_nothing_to_go_on_skips_claude():
     claude = FakeClaude(REPLY)
     result = suggest_industry(DOCS[:1], LABELS[:1], [], client=claude)
     assert claude.requests == []
-    assert result == IndustrySuggestion("unclear", "There is no questionnaire, Companies House record or website to go on.")
+    assert result == IndustrySuggestion("other_financial", "There is no questionnaire, Companies House record or "
+                                                           "website to go on, so choose the industry yourself.")
     assert result.cost_usd == 0
 
 
@@ -58,7 +59,7 @@ def test_unexpected_answers_fall_back_safely():
     reply = {**REPLY, "industry": "bakery", "sources_agree": "maybe",
              "evidence": [{"source_number": 9, "quote": "x"}]}
     result = suggest_industry(DOCS, LABELS, LINKS, client=FakeClaude(reply))
-    assert (result.industry, result.sources_agree) == ("unclear", "one source")
+    assert (result.industry, result.sources_agree) == ("other_financial", "one source")
     assert result.evidence == ['unknown source: "x"']
 
 
@@ -103,3 +104,10 @@ def test_the_risk_rating_picks_the_checklist_level():
     assert checklist_for("insurance", "High") == ("fintech_high", False)
     assert CHECKLISTS["fintech_high"][0] == "Fintech: payments and e-money · High risk"
     assert len(CHECKLISTS) == 18 and all(path.exists() for _, path in CHECKLISTS.values())
+
+
+def test_not_enough_information_is_not_an_industry():
+    assert "unclear" not in INDUSTRIES and "Not enough information" not in INDUSTRIES.values()
+    claude = FakeClaude(REPLY)
+    suggest_industry(DOCS, LABELS, LINKS, client=claude)
+    assert "unclear" not in claude.requests[0]["output_config"]["format"]["schema"]["properties"]["industry"]["enum"]

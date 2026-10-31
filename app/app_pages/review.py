@@ -59,6 +59,7 @@ from services.reviews import (  # noqa: E402
     save_line_reviews,
 )
 from services.risk import (  # noqa: E402
+    evidence_path,
     NOT_ENOUGH,
     RATINGS,
     load_risk_decision,
@@ -556,15 +557,21 @@ if screen == "assess":
     risk = st.session_state.risk[1]
     decision = load_risk_decision(decision_path)
     chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
+    if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
+        chosen_industry = suggestion.industry
 
     st.subheader(":material/fact_check: Industry, risk rating and checklist")
     st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Claude's "
                "reasons and evidence.")
 
-    with st.container(horizontal=True):
-        # --- Industry and checklist: only the industry can be overridden; the checklist follows it ---
-        with st.container(border=True):
-            st.markdown("**:material/domain: Industry and checklist**")
+    # Risk rating on the left, industry and checklist on the right. The right-hand card is filled first because the
+    # risk card needs to know which industry was chosen.
+    risk_column, industry_column = st.columns([1, 2])
+    # --- Industry and checklist, side by side in one box: only the industry can be overridden ---
+    with industry_column.container(border=True):
+        industry_side, checklist_side = st.columns(2)
+        with industry_side:
+            st.markdown("**:material/domain: Industry**")
             st.caption("Clario suggests")
             st.markdown(f"#### {suggestion.industry_label}")
             if suggestion.sources_agree == "no":
@@ -582,47 +589,48 @@ if screen == "assess":
                 if suggestion.evidence:
                     st.markdown("**Evidence**\n" + "\n".join(f"- {quote}" for quote in suggestion.evidence))
                 st.caption("Replayed, $0.00" if suggestion.replayed else f"About ${suggestion.cost_usd:.3f}")
-            st.divider()
+        with checklist_side:
+            st.markdown("**:material/checklist: Checklist**")
             checklist_slot = st.container()  # filled in below, once the risk rating is known
 
-        # --- Risk rating ---
-        with st.container(border=True):
-            st.markdown("**:material/speed: Risk rating**")
-            st.caption("Clario suggests")
-            st.markdown(f"#### :{RATING_COLOURS[risk.overall]}[{risk.overall}]")
-            with st.container(horizontal=True):
-                for found in risk.triggers:
-                    st.badge(f"EDD trigger {found.trigger.id}", icon=":material/priority_high:", color="red")
-                if risk.flagged:
-                    st.badge(f"{len(risk.flagged)} factor(s) need evidence", icon=":material/help:", color="gray")
-                if industry != suggestion.industry:
-                    st.badge("Based on the suggested industry", icon=":material/info:", color="blue")
-            final = st.segmented_control(
-                "Override Rating", RATINGS, required=True, key=f"final_{pack_key}",
-                default=decision.rating if decision else risk.overall,
-                help="Keep Clario's suggestion or override it. An override needs a sign-off (below).")
-            with st.expander("Why this rating?"):
-                st.markdown(f"**{risk.why}.** Rules: any EDD trigger makes it High; otherwise the highest factor "
-                            "wins; a factor without enough evidence counts as Medium.")
-                if industry != suggestion.industry:
-                    st.info(f"This rating was based on the suggested industry ({suggestion.industry_label}). You "
-                            f"chose {INDUSTRIES[industry]}: review the rating and override it if needed.",
-                            icon=":material/info:")
-                for found in risk.triggers:
-                    st.warning(f"**EDD trigger {found.trigger.id}: {found.trigger.text}** ({found.trigger.kind})  \n"
-                               f"{found.reasons}" + "".join(f"  \n> {quote}" for quote in found.evidence),
-                               icon=":material/priority_high:")
-                for rated in risk.factors:
-                    st.markdown(f"**{rated.factor.name}** :{RATING_COLOURS[rated.rating]}-badge[{rated.rating}]  \n"
-                                f"{rated.reasons}")
-                    if rated.evidence:
-                        st.caption("\n".join(f"- {quote}" for quote in rated.evidence))
-                st.caption("Replayed, $0.00" if risk.replayed else f"About ${risk.cost_usd:.3f}")
+    # --- Risk rating ---
+    with risk_column.container(border=True):
+        st.markdown("**:material/speed: Risk rating**")
+        st.caption("Clario suggests")
+        st.markdown(f"#### :{RATING_COLOURS[risk.overall]}[{risk.overall}]")
+        with st.container(horizontal=True):
+            for found in risk.triggers:
+                st.badge(f"EDD trigger {found.trigger.id}", icon=":material/priority_high:", color="red")
+            if risk.flagged:
+                st.badge(f"{len(risk.flagged)} factor(s) need evidence", icon=":material/help:", color="gray")
+            if industry != suggestion.industry:
+                st.badge("Based on the suggested industry", icon=":material/info:", color="blue")
+        final = st.segmented_control(
+            "Override Rating", RATINGS, required=True, key=f"final_{pack_key}",
+            default=decision.rating if decision else risk.overall,
+            help="Keep Clario's suggestion or override it. An override needs a sign-off (below).")
+        with st.expander("Why this rating?"):
+            st.markdown(f"**{risk.why}.** Rules: any EDD trigger makes it High; otherwise the highest factor "
+                        "wins; a factor without enough evidence counts as Medium.")
+            if industry != suggestion.industry:
+                st.info(f"This rating was based on the suggested industry ({suggestion.industry_label}). You "
+                        f"chose {INDUSTRIES[industry]}: review the rating and override it if needed.",
+                        icon=":material/info:")
+            for found in risk.triggers:
+                st.warning(f"**EDD trigger {found.trigger.id}: {found.trigger.text}** ({found.trigger.kind})  \n"
+                           f"{found.reasons}" + "".join(f"  \n> {quote}" for quote in found.evidence),
+                           icon=":material/priority_high:")
+            for rated in risk.factors:
+                st.markdown(f"**{rated.factor.name}** :{RATING_COLOURS[rated.rating]}-badge[{rated.rating}]  \n"
+                            f"{rated.reasons}")
+                if rated.evidence:
+                    st.caption("\n".join(f"- {quote}" for quote in rated.evidence))
+            st.caption("Replayed, $0.00" if risk.replayed else f"About ${risk.cost_usd:.3f}")
 
     # The checklist follows the industry and the risk rating; it cannot be changed on its own
     checklist, written_for_industry = checklist_for(industry, final)
     with checklist_slot:
-        st.caption("Checklist, set by the industry and risk rating")
+        st.caption("Set by the industry and risk rating")
         st.markdown(f"#### {CHECKLISTS[checklist][0]}")
         if not written_for_industry:
             st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
@@ -634,29 +642,47 @@ if screen == "assess":
                 st.caption("There is no checklist written for this industry yet, so the fintech one is used.")
 
     # --- Sign-off: only when the analyst overrides Clario's suggested rating ---
-    reason, reviewer = "", ""
+    reason, reviewer, evidence_link, evidence = "", "", "", None
     if final != risk.overall:
+        overridden_before = decision and decision.overridden
         with st.container(border=True):
-            st.markdown("**:material/gavel: Sign-off for your override**")
+            st.markdown("**:material/gavel: AML senior officer sign-off for the override**")
             st.caption(f":material/edit: You are overriding Clario's suggested rating ({risk.overall}) with {final}. "
-                       "Give a reason and your name.")
-            reason = st.text_area("Reason", value=decision.reason if decision else "", key=f"reason_{pack_key}",
-                                  height=80)
-            reviewer = st.text_input("Reviewer", key=f"reviewer_{pack_key}",
-                                     value=decision.reviewer if decision and decision.reviewer
-                                     else st.session_state.get("last_reviewer", ""))
+                       "An AML senior officer must sign this off, with evidence of the sign-off.")
+            reason = st.text_area("Reason", value=decision.reason if overridden_before else "",
+                                  key=f"reason_{pack_key}", height=80)
+            reviewer = st.text_input("AML senior officer", key=f"reviewer_{pack_key}",
+                                     value=decision.reviewer if overridden_before else "",
+                                     help="Name of the AML senior officer who signed off the override.")
+            st.markdown("**Evidence of the sign-off** (a document, a link, or both)")
+            with st.container(horizontal=True):
+                upload = st.file_uploader("Sign-off document", key=f"evidence_{pack_key}",
+                                          type=["pdf", "png", "jpg", "jpeg", "docx", "msg", "eml"],
+                                          help="For example the signed form, or the approval email saved as a PDF.")
+                evidence_link = st.text_input(
+                    "Or a link to the folder where the evidence is saved", key=f"evidence_link_{pack_key}",
+                    value=decision.evidence_link if overridden_before else "",
+                    placeholder="e.g. https://yourfirm.sharepoint.com/sites/kyc/EXAMPLE-PAYMENTS")
+            if upload:
+                evidence = (upload.name, upload.getvalue())
+            elif overridden_before and decision.evidence_document and evidence_path(decision_path).exists():
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    st.caption(f":material/attach_file: On file: {decision.evidence_document}. Upload a new "
+                               "document to replace it.")
+                    st.download_button("Download", evidence_path(decision_path).read_bytes(),
+                                       file_name=decision.evidence_document, icon=":material/download:",
+                                       key=f"evidence_download_{pack_key}")
 
     with st.container(horizontal=True):
         if st.button("Back", icon=":material/arrow_back:", key="back_assess"):
             go("documents")
         if st.button("Next", type="primary", icon=":material/arrow_forward:", key="next_assess"):
             try:
-                save_risk_decision(decision_path, final, risk.overall, reason, reviewer)
+                save_risk_decision(decision_path, final, risk.overall, reason, reviewer,
+                                   evidence_link=evidence_link, evidence=evidence)
             except ValueError as error:
                 st.error(str(error), icon=":material/error:")
             else:
-                if reviewer.strip():
-                    st.session_state.last_reviewer = reviewer.strip()
                 remember(choice=(industry, checklist))
                 go("results")
     if source == "Upload documents":
@@ -715,7 +741,9 @@ else:
 suggested_checklist, _ = checklist_for(industry, decision.rating)
 st.caption(
     f"Industry: {INDUSTRIES[industry]}. Risk rating: {decision.rating}"
-    + (f" (Clario suggested {decision.suggested})" if decision.suggested != decision.rating else "")
+    + (f" (overriding Clario's {decision.suggested}; signed off by {decision.reviewer}, AML senior officer; "
+       f"evidence: {' and '.join(e for e in (decision.evidence_document, decision.evidence_link) if e)})"
+       if decision.overridden else "")
     + f". Checklist: {CHECKLISTS[checklist][0]} ({len(result.outcomes)} checks)"
     + (", chosen by you instead of the one set by the rating." if checklist != suggested_checklist else ".")
     + (f" {len(overrides)} result(s) changed by an analyst." if overrides else "")

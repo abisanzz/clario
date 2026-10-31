@@ -209,30 +209,53 @@ def suggest_risk(documents: list[UploadedDocument], labels: list[DocumentLabel],
 
 @dataclass(frozen=True)
 class RiskDecision:
-    rating: str  # the analyst's final rating: Low, Medium or High
+    rating: str  # the final rating: Low, Medium or High
     suggested: str  # what Clario suggested
     reason: str
-    reviewer: str
+    reviewer: str  # for an override: the AML senior officer who signed it off
     decided_on: str  # YYYY-MM-DD
-    senior_approver: str = ""  # needed before onboarding a High-risk client (checklist 7.3)
+    senior_approver: str = ""  # no longer used: final approval is now recorded at the end of the review
+    evidence_link: str = ""  # for an override: where the sign-off evidence is saved
+    evidence_document: str = ""  # for an override: the name of the uploaded sign-off document
 
     @property
-    def awaiting_approval(self) -> bool:
-        return self.rating == "High" and not self.senior_approver.strip()
+    def overridden(self) -> bool:
+        return self.rating != self.suggested
+
+
+def evidence_path(path: Path) -> Path:
+    """Where an uploaded sign-off document is kept: beside the decision, never under the uploaded file name."""
+    return path.with_name(path.stem + "-evidence")
 
 
 def save_risk_decision(path: Path, rating: str, suggested: str, reason: str, reviewer: str,
-                       senior_approver: str = "", today: date | None = None) -> RiskDecision:
-    """Record the final rating. Overriding the suggestion needs a sign-off: a reason and the reviewer's name."""
+                       today: date | None = None, evidence_link: str = "",
+                       evidence: tuple[str, bytes] | None = None) -> RiskDecision:
+    """Record the final rating.
+
+    Overriding the suggestion needs a sign-off: a reason, the AML senior officer's name, and evidence of the sign-off
+    (an uploaded document, a link to where it is saved, or both). A document uploaded earlier is kept unless replaced.
+    """
     if rating not in RATINGS:
         raise ValueError(f"Choose a rating: {', '.join(RATINGS)}")
-    if rating != suggested and not reason.strip():
-        raise ValueError(f"Give a reason for rating {rating} when Clario suggested {suggested}")
-    if rating != suggested and not reviewer.strip():
-        raise ValueError("Give the reviewer's name to sign off the override")
+    earlier = load_risk_decision(path)
+    document = evidence[0] if evidence else (earlier.evidence_document if earlier else "")
+    if rating != suggested:
+        if not reason.strip():
+            raise ValueError(f"Give a reason for rating {rating} when Clario suggested {suggested}")
+        if not reviewer.strip():
+            raise ValueError("Give the name of the AML senior officer who signed off the override")
+        if not evidence_link.strip() and not document:
+            raise ValueError("Upload the sign-off document or give a link to the folder where the evidence is saved")
+    else:
+        document, evidence_link = "", ""  # no override, so no sign-off evidence
     decision = RiskDecision(rating, suggested, reason.strip(), reviewer.strip(), (today or date.today()).isoformat(),
-                            senior_approver.strip())
+                            evidence_link=evidence_link.strip(), evidence_document=document)
     path.parent.mkdir(exist_ok=True)
+    if evidence and rating != suggested:
+        evidence_path(path).write_bytes(evidence[1])
+    elif not document:
+        evidence_path(path).unlink(missing_ok=True)
     path.write_text(json.dumps(asdict(decision), indent=2))
     return decision
 
