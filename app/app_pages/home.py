@@ -68,8 +68,8 @@ cards([
     (":material/rate_review:", "4. Supports your review",
      "Gives findings with document and page references, so a reviewer can validate them and decide the next steps."),
     (":material/speed:", "5. Suggests a risk rating",
-     "Rates customer, product, geography and delivery channel risk against your methodology, and flags enhanced due "
-     "diligence triggers, for the reviewer to confirm."),
+     "Rates customer, product, geography and delivery channel risk against your methodology and flags enhanced due "
+     "diligence triggers. Your confirmed rating sets the checklist: simplified, standard or enhanced."),
 ])
 
 # --- What you'll get ---
@@ -82,7 +82,7 @@ cards([
     (":material/checklist:", "Recommended follow-ups",
      "What to request from the client and what to check on public registers."),
     (":material/speed:", "Suggested risk rating",
-     "Low, Medium or High, with the reasons and evidence for each factor."),
+     "Low, Medium or High, with the reasons and evidence for each factor, and a checklist to match."),
 ])
 
 # --- Review, verification and decision ---

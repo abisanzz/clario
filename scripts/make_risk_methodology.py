@@ -1,6 +1,7 @@
 """Draft the KYC risk methodology that Clario's risk rating reads: factors, EDD triggers and how they combine.
 
-DRAFT FOR REVIEW: written from general knowledge of the UK Money Laundering Regulations 2017 and common practice,
+Drafted by Claude from general knowledge of the UK Money Laundering Regulations 2017 and common practice, then
+reviewed on 31 Oct 2026 (see REVIEWED_ON). Any change to the content below needs a fresh review. Originally
 not checked against current legislation, JMLSG guidance or any firm's policy. A compliance professional must
 approve it before it is relied on.
 Run from the project folder (overwrites the draft):  .venv/bin/python scripts/make_risk_methodology.py
@@ -13,7 +14,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 PATH = Path(__file__).resolve().parent.parent / "docs" / "UK_KYC_Risk_Methodology.xlsx"
 DRAFTED_ON = "27 Oct 2026"
-UNCHECKED = "Draft by Claude, not checked against current text"
+REVIEWED_ON = "31 Oct 2026"
+UNCHECKED = f"Reviewed, {REVIEWED_ON}"
 HEADER_FILL = PatternFill("solid", fgColor="FF1F3864")  # the checklists' header colour
 HEADER_FONT = Font(b=True, color="FFFFFFFF")
 WRAP = Alignment(wrap_text=True, vertical="top")
@@ -75,10 +77,13 @@ TRIGGERS = [
 ]
 
 RULES = [
+    ("When", "An initial rating, before the checklist: it decides which checklist is used. Low: simplified due "
+             "diligence. Medium: standard. High: enhanced due diligence."),
     ("Overall rating", "The highest of the four factor ratings."),
     ("EDD triggers", "Any EDD trigger makes the overall rating High and requires enhanced due diligence."),
     ("Not enough information", "A factor without enough evidence counts as Medium and is flagged for the analyst."),
-    ("Analyst confirmation", "The analyst confirms or changes the suggested rating; a change needs a reason."),
+    ("Analyst confirmation", "The analyst confirms or overrides the suggested rating; an override needs a reason. "
+                             "The analyst can also choose a different checklist."),
     ("High risk", "Needs senior management approval before onboarding (checklist 7.3)."),
     ("Review frequency", "Low: every 3 years. Medium: every 2 years. High: every year (checklist 8.1). Firm policy, "
                          "to confirm."),
@@ -121,18 +126,19 @@ def build() -> Path:
     guide.column_dimensions["A"].width = 110
     for line in [
         "How to use this methodology",
-        f"DRAFT FOR REVIEW: drafted by Claude on {DRAFTED_ON} from general knowledge of the UK Money Laundering "
-        "Regulations 2017 and common practice. Have a compliance professional approve every row before relying on it.",
+        f"Drafted by Claude on {DRAFTED_ON} from general knowledge of the UK Money Laundering Regulations 2017 and "
+        f"common practice, and reviewed on {REVIEWED_ON}. Recheck the references when the regulations change.",
         "",
         "Scale: Low, Medium, High. High means enhanced due diligence and senior management approval.",
-        "Clario suggests a rating for each factor with its reasons and evidence; fixed rules combine them as described "
-        "on the 'How it's decided' tab; the analyst confirms or changes the result.",
+        "Before the checklist, Clario suggests a rating for each factor from the ownership and business documents, "
+        "the registers and the website, with reasons and evidence; fixed rules combine them as described on the "
+        "'How it's decided' tab; the analyst confirms or overrides the result, which sets the checklist level.",
         "Clario suggests, and does not make, the risk decision. Not legal advice.",
         "Edit scripts/make_risk_methodology.py and rebuild, rather than editing this file.",
     ]:
         guide.append([line])
     guide["A1"].font = Font(b=True, sz=14)
-    guide["A2"].font = Font(b=True, color="FFC00000")
+    guide["A2"].font = Font(i=True)
     for line in guide.iter_rows(min_row=2):
         line[0].alignment = WRAP
 

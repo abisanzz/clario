@@ -92,3 +92,14 @@ def test_claude_is_told_how_to_split_investment_firms_from_asset_managers():
     suggest_industry(DOCS, LABELS, LINKS, client=claude)
     assert "If the company manages funds (pooled money from many investors) it is asset management" in \
         claude.requests[0]["system"]
+
+
+def test_the_risk_rating_picks_the_checklist_level():
+    from services.checklist import CHECKLISTS
+    from services.industry import checklist_for
+
+    assert checklist_for("payments", "Low") == ("fintech_low", True)
+    assert checklist_for("crypto", "High") == ("crypto_high", True)
+    assert checklist_for("insurance", "High") == ("fintech_high", False)
+    assert CHECKLISTS["fintech_high"][0] == "Fintech: payments and e-money · High risk"
+    assert len(CHECKLISTS) == 18 and all(path.exists() for _, path in CHECKLISTS.values())

@@ -8,14 +8,32 @@ from openpyxl import load_workbook
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 CHECKLIST_PATH = DOCS / "UK_Fintech_KYC_Checklist.xlsx"
 
-# The checklists a user can choose from: key -> (name shown to the user, spreadsheet)
-CHECKLISTS = {
+# One checklist per industry, for a client rated Medium risk: key -> (name, spreadsheet)
+BASE_CHECKLISTS = {
     "fintech": ("Fintech: payments and e-money", CHECKLIST_PATH),
     "general": ("General business (not financial services)", DOCS / "UK_General_Business_KYC_Checklist.xlsx"),
     "crypto": ("Crypto", DOCS / "UK_Crypto_KYC_Checklist.xlsx"),
     "lending": ("Lending and credit", DOCS / "UK_Lending_KYC_Checklist.xlsx"),
     "investment_firm": ("Investment firm", DOCS / "UK_Investment_Firm_KYC_Checklist.xlsx"),
     "asset_management": ("Asset management", DOCS / "UK_Asset_Management_KYC_Checklist.xlsx"),
+}
+RISK_LEVELS = ("Low", "Medium", "High")
+
+
+def level_key(base: str, rating: str) -> str:
+    """The checklist key for an industry's checklist at a risk level: "fintech" (Medium), "fintech_low", "fintech_high"."""
+    return base if rating == "Medium" else f"{base}_{rating.lower()}"
+
+
+def _level_path(medium: Path, rating: str) -> Path:
+    return medium if rating == "Medium" else medium.with_name(medium.stem + f"_{rating}.xlsx")
+
+
+# Every checklist a user can choose from: Low, Medium and High for each industry. key -> (name, spreadsheet)
+CHECKLISTS = {
+    level_key(base, rating): (f"{name} · {rating} risk", _level_path(path, rating))
+    for base, (name, path) in BASE_CHECKLISTS.items()
+    for rating in RISK_LEVELS
 }
 SHEET_NAME = "Checklist"
 

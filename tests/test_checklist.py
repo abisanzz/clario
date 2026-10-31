@@ -61,7 +61,7 @@ def test_missing_column_gives_clear_error(tmp_path):
         load_checks(path)
 
 
-@pytest.mark.parametrize("path", sorted(CHECKLIST_PATH.parent.glob("UK_*_KYC_Checklist.xlsx")), ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", sorted(CHECKLIST_PATH.parent.glob("UK_*_KYC_Checklist*.xlsx")), ids=lambda p: p.stem)
 def test_every_industry_checklist_is_well_formed(path):
     """Each checklist keeps the fintech sections and evidence types, so the app and the Summary tab can read it."""
     fintech = load_checks()

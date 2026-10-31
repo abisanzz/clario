@@ -35,9 +35,12 @@ INDUSTRY_CHECKLISTS = {
 DEFAULT_CHECKLIST = "fintech"
 
 
-def checklist_for(industry: str) -> tuple[str, bool]:
-    """The checklist key for an industry, and whether it was written for that industry."""
-    return INDUSTRY_CHECKLISTS.get(industry, DEFAULT_CHECKLIST), industry in INDUSTRY_CHECKLISTS
+def checklist_for(industry: str, rating: str = "Medium") -> tuple[str, bool]:
+    """The checklist key for an industry at a risk level, and whether it was written for that industry."""
+    from services.checklist import level_key
+
+    base = INDUSTRY_CHECKLISTS.get(industry, DEFAULT_CHECKLIST)
+    return level_key(base, rating), industry in INDUSTRY_CHECKLISTS
 
 
 # Document types that describe what the business does

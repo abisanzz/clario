@@ -4,10 +4,10 @@ Clario reviews a company's KYC (know your customer) pack the way an onboarding a
 
 1. **checks the legal entity name** against Companies House;
 2. **identifies each document** (certificate of incorporation, proof of address, shareholder register and so on);
-3. **works out the industry** from the questionnaire, the official industry codes and the FCA register, and **picks the matching checklist**;
-4. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
-5. lets **an analyst validate the checklist line by line**, confirming or overriding each result;
-6. **suggests a risk rating** (Low, Medium or High) from the results, using the firm's risk methodology, for the analyst to confirm.
+3. **works out the industry** from the questionnaire, the official industry codes and the FCA register;
+4. **suggests an initial risk rating** (Low, Medium or High) from the ownership and business documents and the registers; the analyst confirms or overrides it, and it **picks the checklist**: simplified, standard or enhanced due diligence for that industry;
+5. **checks the pack against every item on that checklist**, showing what is present, what is missing and what doesn't add up, with a quote and page reference for every finding;
+6. lets **an analyst validate the checklist line by line**, confirming or overriding each result.
 
 The output is the "request from client" list and the "check on public registers" list an analyst would otherwise build by hand.
 
@@ -43,10 +43,10 @@ Company website ──────────┘  Claude: evidence for every ch
 - **AI where judgement is needed, rules where it isn't.** Claude reads documents and maps evidence. Deterministic Python rules check the legal entity name against Companies House, the company number format, document dates, the 3-month age limit for proof of address, name matches, and the live Companies House status. Where the rules decide, Claude's view is still shown beside them.
 - **Every finding is traceable.** Each result says who decided it (rules, Claude or a named analyst) and quotes its evidence with document name and page.
 - **Statuses describe the evidence, not the customer.** Present, Missing, Unclear and Needs human review come from the checklist itself. Clario never approves or rejects a client; red flags go to an analyst.
-- **Six checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management. The confirmed industry suggests one, and the analyst can choose another. The five industry checklists were drafted with Claude and approved by a compliance professional on 26 Oct 2026.
+- **Eighteen checklists.** Fintech (payments and e-money), general business, crypto, lending, investment firm and asset management, each at Low, Medium and High risk. The confirmed industry and risk rating set one, and the analyst can choose another. The Medium checklists were approved by a compliance professional on 26 Oct 2026; the Low and High versions were reviewed on 31 Oct 2026.
 - **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, every permission, requirements, disciplinary history and approved individuals). The page warns straight away if the FCA's record links the firm to a different company number.
 - **Drafts.** A review can be saved as a draft and continued later: add or remove documents, edit details, and pick up where you left off. Claude's answers are kept with the draft, so reopening it costs nothing.
-- **Risk rating.** Claude rates customer, product, geography and delivery channel risk against a methodology spreadsheet (`docs/UK_KYC_Risk_Methodology.xlsx`, a draft for compliance review) and flags enhanced due diligence triggers, with evidence. Fixed rules combine them: any trigger means High, otherwise the highest factor wins. The analyst confirms or changes the rating with a reason; High needs senior management approval. Clario never approves or declines a client.
+- **Risk-based checklists.** Before the checklist, Claude rates customer, product, geography and delivery channel risk against a methodology spreadsheet (`docs/UK_KYC_Risk_Methodology.xlsx`, reviewed on 31 Oct 2026) and flags enhanced due diligence triggers, with evidence. Fixed rules combine them: any trigger means High, otherwise the highest factor wins. The analyst confirms or overrides the rating with a reason; High needs senior management approval. The rating picks the checklist: each industry has Low (simplified), Medium (standard) and High (enhanced due diligence) versions, 18 in all. Clario never approves or declines a client.
 - **Line-by-line validation.** The analyst ticks each checklist line as validated, or changes its status with a required note. Every line records who validated it and when, keeps the original answer, can be undone, and is saved on the analyst's own machine.
 
 ## Design choices
@@ -63,8 +63,8 @@ Company website ──────────┘  Claude: evidence for every ch
 | Identify the documents (8 files) | about $0.09 |
 | Suggest the industry | about $0.03 |
 | Map the evidence to the checklist | about $0.21 |
-| Suggest a risk rating | about $0.07 |
-| **Total** | **about $0.40 (roughly 32p)** |
+| Suggest the initial risk rating | about $0.10 |
+| **Total** | **about $0.43 (roughly 34p)** |
 
 Companies House and FCA register lookups are free. The sample pack replays saved answers and costs nothing.
 
@@ -98,11 +98,11 @@ The sample pack needs the Companies House and FCA keys (both free) but no Anthro
 | `services/industry.py` | Industry suggestion and the industry-to-checklist link |
 | `services/validator.py` | The fixed rules for the legal-existence checks |
 | `services/companies_house.py`, `services/fca.py`, `services/website.py` | Live sources |
-| `services/risk.py` | Risk rating: the methodology, Claude's factor ratings and the fixed rules |
+| `services/risk.py` | Initial risk rating: the methodology, Claude's factor ratings and the fixed rules |
 | `services/reviews.py` | Analyst overrides, saved per case |
 | `services/cases.py` | Draft reviews: details, documents and saved answers |
 | `services/extractor.py` | Calls to Claude, saved answers and cost |
-| `docs/*.xlsx` | The six checklists (`scripts/make_industry_checklists.py` builds five of them) |
+| `docs/*.xlsx` | The 18 checklists (`scripts/make_industry_checklists.py` and `scripts/make_risk_level_checklists.py` build them) and the risk methodology |
 | `sample_documents/` | The fictitious sample pack and its saved answers |
 | `data/sic_codes.csv` | Official SIC industry code descriptions |
 | `tests/` | Tests, using fake versions of Claude and the registers |
