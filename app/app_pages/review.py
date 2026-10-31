@@ -5,6 +5,7 @@ Opened from the menu in app/main.py. Run from the project folder:  .venv/bin/str
 
 import sys
 from dataclasses import replace
+from datetime import date
 from itertools import groupby
 from pathlib import Path
 
@@ -262,7 +263,7 @@ def start_over(entity: dict, case_id: str | None) -> None:
     """Load a draft (or nothing, for a new review): forget the fields' contents and any earlier results."""
     for key in [k for k in st.session_state if str(k).startswith(WIDGET_PREFIXES)]:
         del st.session_state[key]
-    for key in ("identification", "labels", "industry", "choice", "assessment", "pack_key"):
+    for key in ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key"):
         st.session_state.pop(key, None)
     st.session_state.entity, st.session_state.case_id, st.session_state.screen = entity, case_id, "details"
 
@@ -282,7 +283,8 @@ def open_review(case_id: str) -> None:
                 "supporting": [document for document, _ in load_supporting(case_id)]}, case_id)
     progress = load_progress(case_id)
     if progress:
-        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"])
+        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"],
+                                label_comments=progress.get("comments", {}))
         if progress["choice"]:
             st.session_state.choice = progress["choice"]
     st.rerun()
@@ -436,17 +438,18 @@ def go(to: str) -> None:
 
 
 def navigation(next_label: str | None = None, next_ready: bool = True, save=None) -> None:
-    """Back and Next buttons. save runs first on either, so this screen's choices are kept whichever way you go."""
+    """Back and Next buttons. save runs first on either, so this screen's choices are kept whichever way you go.
+    If save returns False (something is missing), Next stays on this screen and Back goes back without saving."""
     position = SCREENS.index(screen)
     with st.container(horizontal=True):
         if st.button("Back", icon=":material/arrow_back:", key=f"back_{screen}"):
             if save and next_ready:
-                save()
+                save(quiet=True)
             go(SCREENS[position - 1])
         if next_label and st.button(next_label, type="primary", icon=":material/arrow_forward:",
                                     disabled=not next_ready, key=f"next_{screen}"):
-            if save:
-                save()
+            if save and save() is False:
+                return
             go(SCREENS[position + 1])
 
 
@@ -508,61 +511,75 @@ def dependants(document: UploadedDocument) -> list[str]:
     return found
 
 
-def delete_document(document: UploadedDocument, record: dict | None) -> None:
-    """Delete a document from the review. Deleting an original document means it is identified and checked again."""
-    if record:  # a supporting document added on the results screen
-        remove_supporting_document(st.session_state.case_id, document.fingerprint)
-        path = lines_review_path()
-        for override in list(load_overrides(path).values()) if path else []:
-            if override.via == document.name:  # the line it set to Present goes back to its previous status
-                remove_override(path, override.check_id)
-                log_event(audit_path, st.session_state.get("last_reviewer", ""),
-                          f"Line went back to {override.original_status.value} because {document.name} was deleted",
-                          override.check_id)
-        st.session_state.entity = {**saved, "supporting": [d for d in saved.get("supporting", [])
-                                                            if d.fingerprint != document.fingerprint]}
-    else:
-        remaining = [d for d in saved["documents"] if d.fingerprint != document.fingerprint]
-        save_review(st.session_state.case_id, {k: saved[k] for k in DETAIL_FIELDS}, remaining)
-        st.session_state.entity = {**saved, "documents": remaining}
-        if not remaining:
+def delete_documents(chosen: list[tuple[UploadedDocument, dict | None]]) -> None:
+    """Delete documents from the review. Deleting an original document means the rest are identified and checked
+    again; a line that a supporting document set to Present goes back to its previous status."""
+    who = st.session_state.get("last_reviewer", "")
+    supporting_gone = {d.fingerprint for d, record in chosen if record}
+    originals_gone = {d.fingerprint for d, record in chosen if not record}
+    path = lines_review_path()
+    for document, record in chosen:
+        if record:
+            remove_supporting_document(st.session_state.case_id, document.fingerprint)
+            for override in list(load_overrides(path).values()) if path else []:
+                if override.via == document.name:
+                    remove_override(path, override.check_id)
+                    log_event(audit_path, who, f"Line went back to {override.original_status.value} because "
+                              f"{document.name} was deleted", override.check_id)
+        log_event(audit_path, who, f"Deleted document {document.name}",
+                  f"check {record['check_id']}" if record else "")
+    entity = {**saved, "supporting": [d for d in saved.get("supporting", []) if d.fingerprint not in supporting_gone]}
+    if originals_gone:
+        entity["documents"] = [d for d in saved["documents"] if d.fingerprint not in originals_gone]
+        save_review(st.session_state.case_id, {k: saved[k] for k in DETAIL_FIELDS}, entity["documents"])
+        if not entity["documents"]:
             st.session_state.screen = "details"
-    log_event(audit_path, st.session_state.get("last_reviewer", ""), f"Deleted document {document.name}",
-              f"check {record['check_id']}" if record else "")
+    st.session_state.entity = entity
     st.session_state.pop("delete_pending", None)
 
 
 with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)})", icon=":material/folder_open:"):
     rows = [(d, None) for d in original_documents] + list(stored_supporting)
-    for document, record in rows:
-        name_side, description_side, delete_side = st.columns([3, 4, 1], vertical_alignment="center")
-        name_side.markdown(f"**{document.name}**"
-                           + (f"  \n:gray[Supporting document for check {record['check_id']}]" if record else ""))
-        description = record.get("description", "") if record else document.description
-        description_side.caption(description or "No description given")
-        sample_file = source == "Sample pack" and not record
-        if delete_side.button("Delete", icon=":material/delete:", key=f"delete_{document.fingerprint}",
-                              disabled=sample_file, help="The sample's documents cannot be deleted." if sample_file
-                              else "Remove this document from the review."):
-            st.session_state.delete_pending = document.fingerprint
-        if st.session_state.get("delete_pending") == document.fingerprint:
-            with st.container(border=True):
+    table = pd.DataFrame([{
+        "File": document.name,
+        "Your description": (record.get("description", "") if record else document.description) or "",
+        "Supports": f"Check {record['check_id']}" if record else "Original document",
+        "Delete": False,
+    } for document, record in rows])
+    edited = st.data_editor(
+        table, hide_index=True, disabled=["File", "Your description", "Supports"],
+        key=f"documents_{pack_key}_{len(rows)}",
+        column_config={"Delete": st.column_config.CheckboxColumn(help="Tick, then click Delete selected")})
+    ticked = [rows[i] for i, row in edited.iterrows() if row["Delete"]]
+    if st.button("Delete selected", icon=":material/delete:", disabled=not ticked):
+        st.session_state.delete_pending = [document.fingerprint for document, _ in ticked]
+    pending = [(d, r) for d, r in rows if d.fingerprint in st.session_state.get("delete_pending", [])]
+    if pending:
+        deletable = [(d, r) for d, r in pending if r or source != "Sample pack"]
+        skipped = [d.name for d, r in pending if not (r or source != "Sample pack")]
+        with st.container(border=True):
+            message = []
+            for document, record in deletable:
                 used_for = dependants(document)
-                st.warning(f"Delete **{document.name}**?"
-                           + ("  \nThis document was used for:" + "".join(f"\n- {item}" for item in used_for)
-                              + "\n\nDeleting it will change these: they will be worked out again without this "
-                              "document." if used_for else "")
-                           + ("" if record else "  \nThe remaining documents will be identified and checked again "
-                              "(roughly 3-4p per document for your own uploads). Your line reviews, risk rating and "
-                              "approval are kept."),
-                           icon=":material/delete:")
-                with st.container(horizontal=True):
-                    if st.button("Yes, delete", type="primary", key=f"confirm_{document.fingerprint}"):
-                        delete_document(document, record)
-                        st.rerun()
-                    if st.button("Cancel", key=f"cancel_{document.fingerprint}"):
-                        st.session_state.pop("delete_pending", None)
-                        st.rerun()
+                message.append(f"**{document.name}**" + (
+                    " was used for:" + "".join(f"\n  - {item}" for item in used_for) if used_for else
+                    ": not used for any result"))
+            st.warning(
+                ("Delete these documents?\n\n" + "\n".join(f"- {m}" for m in message)
+                 + "\n\nDeleting them will change anything listed: it will be worked out again without them."
+                 + ("  \nThe remaining documents will be identified and checked again (roughly 3-4p per document "
+                    "for your own uploads). Your line reviews, risk rating and approval are kept."
+                    if any(not r for _, r in deletable) else "") if deletable else "Nothing can be deleted.")
+                + (f"  \nThe sample's documents cannot be deleted, so these will be skipped: {', '.join(skipped)}."
+                   if skipped else ""),
+                icon=":material/delete:")
+            with st.container(horizontal=True):
+                if deletable and st.button("Yes, delete", type="primary", key="confirm_delete"):
+                    delete_documents(deletable)
+                    st.rerun()
+                if st.button("Cancel", key="cancel_delete"):
+                    st.session_state.pop("delete_pending", None)
+                    st.rerun()
 if st.session_state.get("pack_key") != pack_key:
     st.session_state.pack_key = pack_key
     for key in ("identification", "labels", "industry", "choice", "assessment"):
@@ -573,7 +590,7 @@ def remember(**choices) -> None:
     st.session_state.update(choices)
     if st.session_state.get("case_id"):
         save_progress(st.session_state.case_id, pack_key, st.session_state.get("labels"),
-                      st.session_state.get("choice"))
+                      st.session_state.get("choice"), comments=st.session_state.get("label_comments"))
 
 
 # --- Screen 2: what each document is ---
@@ -593,25 +610,57 @@ if screen == "documents":
             identification = st.session_state.identification
             shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
             description_of = {d.name: d.description for d in documents}
-            st.caption("Change a label if Claude got it wrong. The checks use these labels. Open **Details** to see "
-                       "Claude's reason.")
-            confirmed = []
+            st.caption("Change a document type if Claude got it wrong (the checks use these), and add any comments. "
+                       "Open a file's **Details** to see why Claude thinks so.")
+            comments_before = st.session_state.get("label_comments", {})
+            claude_types = {label.name: label.document_type for label in identification.labels}
+            widths = [3, 3, 4]
+            header = st.columns(widths)
+            for column, title in zip(header, ["Document type", "File", "Comments"]):
+                column.markdown(f"**{title}**")
+            confirmed, comments = [], {}
             for number, label in enumerate(shown):
-                with st.container(border=True):
-                    name_side, type_side = st.columns([3, 2], vertical_alignment="center")
-                    name_side.markdown(f"**{label.name}**")
-                    if description_of.get(label.name):
-                        name_side.caption(f"Your description: {description_of[label.name]}")
-                    chosen_type = type_side.selectbox(
-                        f"Document type of {label.name}", list(DOCUMENT_TYPES.values()),
-                        index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
-                        label_visibility="collapsed", help="Change this if Claude got it wrong.")
-                    with st.expander("Details"):
-                        st.markdown(label.reason or "No reason given.")
-                    confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
+                type_side, file_side, comment_side = st.columns(widths, vertical_alignment="center")
+                file_side.markdown(label.name)
+                chosen_type = type_side.selectbox(
+                    f"Document type of {label.name}", list(DOCUMENT_TYPES.values()),
+                    index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
+                    label_visibility="collapsed")
+                type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
+                comment = comment_side.text_input(
+                    f"Comments on {label.name}", value=comments_before.get(label.name, ""),
+                    key=f"label_comment_{pack_key}_{number}", label_visibility="collapsed",
+                    placeholder="Required: why did you change the document type?" if type_changed else "Comments")
+                with st.expander("Details"):
+                    st.markdown(f"**Why Claude thinks so:** {label.reason or 'No reason given.'}")
+                    st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
+                confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
+                if comment.strip():
+                    comments[label.name] = comment.strip()
             st.caption("Labels: replayed, $0.00" if identification.replayed
                        else f"Labels: about ${identification.cost_usd:.3f}")
-    navigation("Next", "identification" in st.session_state, save=lambda: remember(labels=confirmed))
+    def save_labels(quiet: bool = False) -> bool:
+        """Keep the document types and comments, and record what changed in the audit log. A document type
+        changed from Claude's needs a comment; if one is missing nothing is saved."""
+        missing = [label.name for label in confirmed
+                   if label.document_type != claude_types[label.name] and not comments.get(label.name)]
+        if missing:
+            if not quiet:
+                st.error("Add a comment for " + ", ".join(missing) + ": you changed the document type from "
+                         "Claude's.", icon=":material/error:")
+            return False
+        before = {label.name: label for label in shown}
+        who = st.session_state.get("last_reviewer", "")
+        for label in confirmed:
+            if label.document_type != before[label.name].document_type:
+                log_event(audit_path, who, f"Document type of {label.name}: {before[label.name].type_label} → "
+                          f"{label.type_label}")
+            if comments.get(label.name, "") != comments_before.get(label.name, ""):
+                log_event(audit_path, who, f'Comment on {label.name}: "{comments.get(label.name, "")}"')
+        remember(labels=confirmed, label_comments=comments)
+        return True
+
+    navigation("Next", "identification" in st.session_state, save=save_labels)
     if source == "Upload documents":
         st.caption("Next asks Claude to suggest the industry and an initial risk rating (roughly 13-18p together). A "
                    "reopened review with unchanged documents costs nothing.")
@@ -873,6 +922,13 @@ result = apply_overrides(named, overrides)
 approval_path = case_file(review_key, "final-approval")
 approval = load_approval(approval_path)
 
+# Step 4 reviews sections 1 to 6. Section 7 (risk rating and escalation) is covered by step 3, the final approval
+# and the audit log, so it is not shown. Section 8 (ongoing monitoring) comes after the final approval.
+RISK_SECTION, ONGOING_SECTION = "7.", "8."
+review_outcomes = [o for o in result.outcomes if not o.check.section.startswith((RISK_SECTION, ONGOING_SECTION))]
+ongoing_outcomes = [o for o in result.outcomes if o.check.section.startswith(ONGOING_SECTION)]
+REVIEW_YEARS = {"Low": 3, "Medium": 2, "High": 1}  # review frequency from the risk methodology
+
 st.header("Results")
 with st.container(border=True, horizontal=True, vertical_alignment="center"):
     with st.container():
@@ -904,7 +960,8 @@ with st.container(horizontal=True):
         (Status.NEEDS_HUMAN_REVIEW, "A judgement call for an analyst"),
         (Status.NOT_STARTED, "Screening and analyst decisions, done outside this tool"),
     ]:
-        st.metric(STATUS_TEXT[status], result.count(status), help=help_text, border=True)
+        st.metric(STATUS_TEXT[status], sum(o.status is status for o in review_outcomes), help=help_text,
+                  border=True)
 
 left, right = st.columns(2)
 for column, title, icon, gaps, empty in [
@@ -927,9 +984,9 @@ st.caption(
     "evidence, or to upload supporting documents. Then click **Save review**. :material/lock: Saved on this computer "
     "only."
 )
-validated_count = sum(bool(o.validated_by) for o in result.outcomes)
-st.progress(validated_count / len(result.outcomes),
-            text=f"{validated_count} of {len(result.outcomes)} lines validated")
+validated_count = sum(bool(o.validated_by) for o in review_outcomes)
+st.progress(validated_count / len(review_outcomes),
+            text=f"{validated_count} of {len(review_outcomes)} lines validated")
 
 supporting_by_check, supporting_documents = {}, {}
 if st.session_state.get("case_id"):
@@ -1033,7 +1090,69 @@ def save_lines(selected: list) -> list[str]:
 
 
 lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
-for section, outcomes in groupby(result.outcomes, key=lambda o: o.check.section):
+
+
+def render_line(o) -> None:
+    """One checklist line: status, tick, comment and Save, with Details and a supporting document."""
+    key = f"{review_path.stem}_{o.check.id}_{line_versions.get(o.check.id, 0)}"
+    with st.container(border=True):
+        text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
+        text_side.markdown(f"**{o.check.id}** {o.check.check}")
+        status = STATUS_FROM_TEXT[status_side.selectbox(
+            "Status", list(STATUS_TEXT.values()), index=list(STATUS_TEXT).index(o.status),
+            key=f"status_{key}", label_visibility="collapsed")]
+        validated = tick_side.checkbox("Validated", value=bool(o.validated_by), key=f"validated_{key}")
+        comment_side, line_save_side = st.columns([6, 1], vertical_alignment="center")
+        comment = comment_side.text_input(
+            "Comment", value=o.reviewer_note, key=f"comment_{key}", label_visibility="collapsed",
+            placeholder="Comment (required if you change the status)")
+        with st.expander("Details"):
+            st.markdown(f"**Finding:** {o.finding}")
+            if o.claude_finding:
+                st.markdown(f"**Claude's view:** {o.claude_finding}")
+            st.markdown(f"**Decided by:** {o.decided_by}"
+                        + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
+            if o.before_review:
+                st.markdown(f"**Before the change:** {o.before_review}")
+            st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
+                                            if o.evidence else " none quoted"))
+            for record in supporting_by_check.get(o.check.id, []):
+                st.caption(f":material/attach_file: Supporting document: {record['name']}"
+                           + (f" ({record['description']})" if record.get("description") else "")
+                           + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
+                           + f" on {record['added_on']}"
+                           + (f". Claude: {record['verdict']}. {record.get('verdict_finding', '')}"
+                              if record.get("verdict") else ""))
+        # Add a supporting document: upload, describe it and save, in a fold-out section
+        with st.expander("Upload supporting document", icon=":material/attach_file:"):
+            uploads = st.file_uploader(
+                "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
+                help="Added to the review's document store when you save this line.")
+            description = st.text_input(
+                "What does this document show? (optional)", key=f"description_{key}",
+                placeholder="e.g. Updated register of members, dated 20 Oct 2026",
+                help="Claude reads this with the document to understand what it is for.")
+            if uploads and o.status is not Status.PRESENT:
+                st.caption(":material/smart_toy: When you save, Claude reads the document against this "
+                           "check (roughly 1-3p) and sets the line to Present if it provides the evidence.")
+            upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
+                                    disabled=not uploads, help="Add the document and save this line.")
+        line = (o, status, validated, comment or "", uploads or [], description or "")
+        lines.append(line)
+        line_save = line_save_side.button("Save", icon=":material/save:", key=f"save_{key}",
+                                          disabled=not is_changed(line), help="Save this line now.",
+                                          width="stretch")
+        if line_save or upload_save:
+            problems = save_lines([line])
+            if problems:
+                st.error("Not saved:\n" + "\n".join(f"- {problem}" for problem in problems),
+                         icon=":material/error:")
+            else:
+                st.rerun()
+
+
+
+for section, outcomes in groupby(review_outcomes, key=lambda o: o.check.section):
     outcomes = list(outcomes)
     present = sum(o.status is Status.PRESENT for o in outcomes)
     open_issues = sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in outcomes)
@@ -1058,62 +1177,7 @@ for section, outcomes in groupby(result.outcomes, key=lambda o: o.check.section)
                     else:
                         st.rerun()
         for o in outcomes:
-            key = f"{review_path.stem}_{o.check.id}_{line_versions.get(o.check.id, 0)}"
-            with st.container(border=True):
-                text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
-                text_side.markdown(f"**{o.check.id}** {o.check.check}")
-                status = STATUS_FROM_TEXT[status_side.selectbox(
-                    "Status", list(STATUS_TEXT.values()), index=list(STATUS_TEXT).index(o.status),
-                    key=f"status_{key}", label_visibility="collapsed")]
-                validated = tick_side.checkbox("Validated", value=bool(o.validated_by), key=f"validated_{key}")
-                comment_side, line_save_side = st.columns([6, 1], vertical_alignment="center")
-                comment = comment_side.text_input(
-                    "Comment", value=o.reviewer_note, key=f"comment_{key}", label_visibility="collapsed",
-                    placeholder="Comment (required if you change the status)")
-                with st.expander("Details"):
-                    st.markdown(f"**Finding:** {o.finding}")
-                    if o.claude_finding:
-                        st.markdown(f"**Claude's view:** {o.claude_finding}")
-                    st.markdown(f"**Decided by:** {o.decided_by}"
-                                + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
-                    if o.before_review:
-                        st.markdown(f"**Before the change:** {o.before_review}")
-                    st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
-                                                    if o.evidence else " none quoted"))
-                    for record in supporting_by_check.get(o.check.id, []):
-                        st.caption(f":material/attach_file: Supporting document: {record['name']}"
-                                   + (f" ({record['description']})" if record.get("description") else "")
-                                   + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
-                                   + f" on {record['added_on']}"
-                                   + (f". Claude: {record['verdict']}. {record.get('verdict_finding', '')}"
-                                      if record.get("verdict") else ""))
-                # Add a supporting document: upload, describe it and save, in a fold-out section
-                with st.expander("Upload supporting document", icon=":material/attach_file:"):
-                    uploads = st.file_uploader(
-                        "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
-                        help="Added to the review's document store when you save this line.")
-                    description = st.text_input(
-                        "What does this document show? (optional)", key=f"description_{key}",
-                        placeholder="e.g. Updated register of members, dated 20 Oct 2026",
-                        help="Claude reads this with the document to understand what it is for.")
-                    if uploads and o.status is not Status.PRESENT:
-                        st.caption(":material/smart_toy: When you save, Claude reads the document against this "
-                                   "check (roughly 1-3p) and sets the line to Present if it provides the evidence.")
-                    upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
-                                            disabled=not uploads, help="Add the document and save this line.")
-                line = (o, status, validated, comment or "", uploads or [], description or "")
-                lines.append(line)
-                line_save = line_save_side.button("Save", icon=":material/save:", key=f"save_{key}",
-                                                  disabled=not is_changed(line), help="Save this line now.",
-                                                  width="stretch")
-                if line_save or upload_save:
-                    problems = save_lines([line])
-                    if problems:
-                        st.error("Not saved:\n" + "\n".join(f"- {problem}" for problem in problems),
-                                 icon=":material/error:")
-                    else:
-                        st.rerun()
-
+            render_line(o)
 
 changed = [line for line in lines if is_changed(line)]
 with st.container(horizontal=True, vertical_alignment="center"):
@@ -1159,9 +1223,9 @@ with st.container(border=True):
                   help="Recorded in the audit log under the Reviewer name at the top of the checklist.")
     else:
         st.caption("Every review needs senior management approval before the client is onboarded.")
-        remaining = len(result.outcomes) - validated_count
+        remaining = len(review_outcomes) - validated_count
         if remaining:
-            st.warning(f"{remaining} of {len(result.outcomes)} lines have not been validated yet.",
+            st.warning(f"{remaining} of {len(review_outcomes)} lines have not been validated yet.",
                        icon=":material/checklist:")
         with st.form("final_approval"):
             approver = st.text_input("Senior manager")
@@ -1176,6 +1240,25 @@ with st.container(border=True):
                     log_event(audit_path, approver, "Approved the review"
                               + (f": {approval_note.strip()}" if approval_note.strip() else ""))
                     st.rerun()
+
+# --- After approval: ongoing monitoring (section 8) ---
+
+with st.container(border=True):
+    st.subheader(":material/event_repeat: After approval: ongoing monitoring")
+    if not approval:
+        st.caption("Opens once the review is approved: setting the next review date, the triggers for an early "
+                   "review, and record keeping (checklist section 8).")
+    else:
+        approved_on = date.fromisoformat(approval.approved_on)
+        years = REVIEW_YEARS[decision.rating]
+        try:
+            next_review = approved_on.replace(year=approved_on.year + years)
+        except ValueError:  # 29 February
+            next_review = approved_on.replace(year=approved_on.year + years, day=28)
+        st.info(f"**Next review due: {next_review:%d %b %Y}**: {years} year{'s' if years > 1 else ''} after approval, "
+                f"for a {decision.rating} risk client (risk methodology).", icon=":material/event:")
+        for o in ongoing_outcomes:
+            render_line(o)
 
 # --- Audit log ---
 

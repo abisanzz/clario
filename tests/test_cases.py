@@ -76,7 +76,7 @@ def test_label_corrections_and_choice_are_kept_with_the_draft(tmp_path):
               DocumentLabel("bill.pdf", "other", "Corrected by the reviewer")]
     save_progress(case_id, "pack-1", labels, ("payments", "fintech"), folder=tmp_path)
     assert load_progress(case_id, folder=tmp_path) == {
-        "pack_key": "pack-1", "labels": labels, "choice": ("payments", "fintech")}
+        "pack_key": "pack-1", "labels": labels, "choice": ("payments", "fintech"), "comments": {}}
     save_progress(case_id, "pack-1", labels, None, folder=tmp_path)  # no choice yet
     assert load_progress(case_id, folder=tmp_path)["choice"] is None
 
@@ -183,3 +183,10 @@ def test_a_supporting_document_can_be_deleted(tmp_path):
     assert load_supporting(case_id, folder=tmp_path) == []
     assert not (tmp_path / case_id / "documents" / wealth.fingerprint).exists()
     assert (tmp_path / case_id / "documents" / CERT.fingerprint).exists()  # the original documents stay
+
+
+def test_document_comments_are_kept_with_the_draft(tmp_path):
+    from services.cases import load_progress, save_progress
+    case_id = new_case_id()
+    save_progress(case_id, "pack-1", [], None, folder=tmp_path, comments={"bill.pdf": "Older than 3 months"})
+    assert load_progress(case_id, folder=tmp_path)["comments"] == {"bill.pdf": "Older than 3 months"}

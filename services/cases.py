@@ -163,7 +163,7 @@ def answer_paths(case_id: str, folder: Path | None = None) -> dict[str, Path]:
 
 
 def save_progress(case_id: str, pack_key: str, labels: list[DocumentLabel] | None, choice: tuple[str, str] | None,
-                  folder: Path | None = None) -> None:
+                  folder: Path | None = None, comments: dict[str, str] | None = None) -> None:
     """Keep the reviewer's label corrections and industry and checklist choice with the draft.
 
     pack_key is the fingerprint of the documents they apply to; they are dropped if the documents change.
@@ -174,6 +174,7 @@ def save_progress(case_id: str, pack_key: str, labels: list[DocumentLabel] | Non
         "pack_key": pack_key,
         "labels": [[label.name, label.document_type, label.reason] for label in labels or []],
         "choice": list(choice) if choice else None,
+        "comments": comments or {},
     }
     temporary = path / "progress.json.tmp"
     temporary.write_text(json.dumps(record, indent=2))
@@ -190,6 +191,7 @@ def load_progress(case_id: str, folder: Path | None = None) -> dict:
         "pack_key": record["pack_key"],
         "labels": [DocumentLabel(*item) for item in record["labels"]],
         "choice": tuple(record["choice"]) if record["choice"] else None,
+        "comments": record.get("comments", {}),
     }
 
 

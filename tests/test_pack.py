@@ -112,5 +112,7 @@ def test_the_analysts_description_goes_with_the_file():
     content = claude.requests[0]["messages"][0]["content"]
     assert content[2] == {"type": "text",
                           "text": "File 2: scan_002.pdf (the analyst says it shows: Register of members, Oct 2026)"}
-    assert "treat that as a hint, but decide from the file itself" in claude.requests[0]["system"]
+    system = claude.requests[0]["system"]
+    assert "combining your own reading of the file with the analyst's description" in system
+    assert "say in your reason that it differs from the description" in system
     assert pack_fingerprint([described]) != pack_fingerprint([UploadedDocument("scan_002.pdf", b"%PDF register")])
