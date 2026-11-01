@@ -8,10 +8,10 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))  # so "services" can be imported when Streamlit runs this file
 
+from app.session import ASSESSMENT_PAGE, ASSESSMENTS_PAGE, new_assessment  # noqa: E402
 from services.cases import list_cases  # noqa: E402
 from services.pack import DOCUMENT_TYPES  # noqa: E402
 
-REVIEW_PAGE = "app_pages/review.py"
 
 
 def cards(items: list[tuple[str, str, str]]) -> None:
@@ -25,12 +25,11 @@ def cards(items: list[tuple[str, str, str]]) -> None:
 
 def start_button(key: str) -> None:
     with st.container(horizontal=True):
-        if st.button("Start document review", type="primary", icon=":material/arrow_forward:", key=key):
-            st.session_state.screen = "details"
-            st.switch_page(REVIEW_PAGE)
-        if list_cases() and st.button("Continue a saved review", icon=":material/folder_open:", key=f"{key}_continue"):
-            st.session_state.screen = "details"  # the saved reviews are listed at the top of the first screen
-            st.switch_page(REVIEW_PAGE)
+        if st.button("Start a new assessment", type="primary", icon=":material/arrow_forward:", key=key):
+            new_assessment()
+            st.switch_page(ASSESSMENT_PAGE)
+        if list_cases() and st.button("Go to your assessments", icon=":material/folder_open:", key=f"{key}_continue"):
+            st.switch_page(ASSESSMENTS_PAGE)
 
 
 # --- Hero ---

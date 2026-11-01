@@ -140,8 +140,22 @@ class FinalApproval:
     note: str = ""
 
 
-def approve_review(path: Path, approver: str, note: str = "", today: date | None = None) -> FinalApproval:
-    """Record senior management's approval of the whole review."""
+def outstanding_lines(assessment: PackAssessment) -> list[str]:
+    """Lines that stop approval: every line must be Present and validated. E.g. "3.1 Missing", "5.3 not validated"."""
+    problems = []
+    for o in assessment.outcomes:
+        if o.status is not Status.PRESENT:
+            problems.append(f"{o.check.id} {o.status.value}")
+        elif not o.validated_by:
+            problems.append(f"{o.check.id} not validated")
+    return problems
+
+
+def approve_review(path: Path, approver: str, note: str = "", today: date | None = None,
+                   outstanding: list[str] = ()) -> FinalApproval:
+    """Record senior management's approval of the whole review. Refused while any line is outstanding."""
+    if outstanding:
+        raise ValueError(f"Cannot approve: {len(outstanding)} line(s) are not complete ({', '.join(outstanding)})")
     if not approver.strip():
         raise ValueError("Give the senior manager's name")
     approval = FinalApproval(approver.strip(), (today or date.today()).isoformat(), note.strip())

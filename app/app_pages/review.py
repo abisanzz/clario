@@ -4,7 +4,7 @@ Opened from the menu in app/main.py. Run from the project folder:  .venv/bin/str
 """
 
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import date
 from itertools import groupby
 from pathlib import Path
@@ -24,18 +24,47 @@ from services.companies_house import (  # noqa: E402
 )
 from services.extractor import ExtractionFailed  # noqa: E402
 from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
+from app.session import open_assessment  # noqa: E402
+from services.overview import summarise  # noqa: E402
+from services.cycles import (  # noqa: E402
+    approved_snapshots,
+    carry_forward,
+    copy_file,
+    current_cycle,
+    cycle_key,
+    freeze,
+    load_snapshot,
+    load_submission,
+    remove_snapshot,
+    start_periodic_review,
+    submit_for_approval,
+    withdraw_submission,
+)
+from services.workflow import (  # noqa: E402
+    REVIEW_YEARS,
+    APPROVED,
+    CANCELLED,
+    DEFINITIONS,
+    IN_PROGRESS,
+    NOT_STARTED,
+    ON_HOLD,
+    PENDING_APPROVAL,
+    REJECTED,
+    UNDER_REVIEW,
+    clear_status,
+    load_status,
+    next_review_date,
+    set_status,
+)
 from services.audit import describe_line_change, events_csv, load_events, log_event  # noqa: E402
 from services.cases import (  # noqa: E402
     DETAIL_FIELDS,
     add_supporting_document,
     answer_paths,
-    load_case,
-    load_progress,
     load_supporting,
     remove_supporting_document,
-    find_by_review_id,
     find_case,
-    latest_reviews,
+    list_cases,
     review_id,
     save_progress,
     save_review,
@@ -56,8 +85,10 @@ from services.pack import (  # noqa: E402
     pack_fingerprint,
 )
 from services.reviews import (  # noqa: E402
+    FinalApproval,
     save_override,
     approve_review,
+    outstanding_lines,
     load_approval,
     withdraw_approval,
     apply_overrides,
@@ -231,17 +262,6 @@ def show_industry(link_or_number: str) -> None:
 st.html("""<style>
 [data-testid="stWidgetLabel"] > div { flex: 0 0 auto; justify-content: flex-start; margin-left: 0.4rem; }
 </style>""")
-st.title("Clario KYC workspace")
-st.markdown(
-    "Provide the details of the legal entity you are reviewing and upload the documents you hold for it. Clario uses "
-    "them to establish the entity's identity, check it against Companies House and the FCA register, understand its "
-    "ownership and structure, and map the evidence to the KYC checklist for its industry."
-)
-st.caption(
-    "Make sure the details match the entity's official records. Where information is missing or inconsistent, Clario "
-    "lists what to request from the client and what to check on public registers. Every finding shows where it came "
-    "from, for you to validate."
-)
 
 # --- Screen 1: Legal Entity Information ---
 # Streamlit forgets the contents of fields that are not on screen, so "Next" saves them for the session
@@ -256,38 +276,25 @@ def remembered(field: str, sample_value: str, source: str) -> str:
     return sample_value if source == "Sample pack" else ""
 
 
-WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "source")
-
-
-def start_over(entity: dict, case_id: str | None) -> None:
-    """Load a draft (or nothing, for a new review): forget the fields' contents and any earlier results."""
-    for key in [k for k in st.session_state if str(k).startswith(WIDGET_PREFIXES)]:
-        del st.session_state[key]
-    for key in ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key"):
-        st.session_state.pop(key, None)
-    st.session_state.entity, st.session_state.case_id, st.session_state.screen = entity, case_id, "details"
-
-
 def save_draft(details: dict, documents: list[UploadedDocument]) -> None:
     """Save the review on this computer. One review per legal entity: this replaces any other saved review of it."""
     stored = documents if details["source"] == "Upload documents" else []  # the sample's files stay where they are
+    is_new = not st.session_state.get("case_id")
+    before = {d.fingerprint: d.name for d in saved.get("documents", [])} if not is_new else {}
     case_id = save_review(st.session_state.get("case_id"), details, stored)
     st.session_state.case_id = case_id
+    log_path, who = case_file(case_id, "audit").with_suffix(".jsonl"), st.session_state.get("last_reviewer", "")
+    if is_new:
+        log_event(log_path, who, f"Created the assessment for {details['entity_name'] or 'an unnamed entity'}"
+                  + (" (sample pack)" if details["source"] == "Sample pack" else ""))
+    after = {d.fingerprint: d.name for d in stored}
+    for fingerprint, name in after.items():
+        if fingerprint not in before:
+            log_event(log_path, who, f"Uploaded document {name}")
+    for fingerprint, name in before.items():
+        if fingerprint not in after:
+            log_event(log_path, who, f"Removed document {name}")
     st.session_state.entity = {**details, "documents": stored, "supporting": saved.get("supporting", [])}
-
-
-def open_review(case_id: str) -> None:
-    """Load a saved review, with its label corrections and industry choice, and show its first screen."""
-    details, stored = load_case(case_id)
-    start_over({**details, "documents": stored,
-                "supporting": [document for document, _ in load_supporting(case_id)]}, case_id)
-    progress = load_progress(case_id)
-    if progress:
-        st.session_state.update(labels=progress["labels"], pack_key=progress["pack_key"],
-                                label_comments=progress.get("comments", {}))
-        if progress["choice"]:
-            st.session_state.choice = progress["choice"]
-    st.rerun()
 
 
 def draft_label(draft: dict) -> str:
@@ -296,34 +303,18 @@ def draft_label(draft: dict) -> str:
             f"saved {saved_at}")
 
 
-if st.session_state.get("screen", "details") == "details":
-    drafts = latest_reviews()  # one per legal entity
-    if drafts or st.session_state.get("case_id"):
-        with st.container(border=True):
-            st.subheader(":material/folder_open: Your saved reviews")
-            if st.session_state.get("case_id"):
-                st.caption(f"You are working on saved review **{review_id(st.session_state.case_id)}**: "
-                           f"{saved.get('entity_name') or 'Unnamed entity'}. Changes are saved when you click Next or "
-                           "Save as draft.")
-            with st.container(horizontal=True, vertical_alignment="bottom"):
-                typed_id = st.text_input("Find a review by ID", placeholder="e.g. CLR-E9BD2CD5", width="stretch",
-                                         help="Each legal entity's review has its own ID, shown at the top of the "
-                                              "review. Type it to open the latest review of that entity.")
-                if st.button("Find", icon=":material/search:", disabled=not typed_id.strip()):
-                    found = find_by_review_id(typed_id)
-                    if found:
-                        open_review(found)
-                    st.error(f"No saved review has the ID {typed_id.strip().upper()}.", icon=":material/error:")
-            with st.container(horizontal=True, vertical_alignment="bottom"):
-                by_id = {d["id"]: d for d in drafts}
-                chosen = st.selectbox("Continue a saved review", list(by_id), format_func=lambda i: draft_label(by_id[i]),
-                                      index=None, placeholder="Choose a review", width="stretch") if drafts else None
-                if st.button("Open review", icon=":material/folder_open:", disabled=not chosen):
-                    open_review(chosen)
-                if st.button("Start a new review", icon=":material/add:"):
-                    start_over({}, None)
-                    st.rerun()
-
+def details_tab() -> None:
+    """The legal entity's details and documents; Save and continue saves them as the review."""
+    st.markdown(
+        "Provide the details of the legal entity you are reviewing and upload the documents you hold for it. Clario "
+        "uses them to establish the entity's identity, check it against Companies House and the FCA register, "
+        "understand its ownership and structure, and map the evidence to the KYC checklist for its industry."
+    )
+    st.caption(
+        "Make sure the details match the entity's official records. Where information is missing or inconsistent, "
+        "Clario lists what to request from the client and what to check on public registers. Every finding shows "
+        "where it came from, for you to validate."
+    )
     with st.container(border=True):
         st.subheader(":material/upload_file: Legal Entity Information")
         # The documents choice sits below the fields but decides what they are filled with, so read its last setting
@@ -361,7 +352,8 @@ if st.session_state.get("screen", "details") == "details":
                     f"({draft_label(existing)}). Each legal entity has one review, so saving this one will replace "
                     "it. To add to the saved review instead, open it.", icon=":material/warning:")
                 if st.button("Open the saved review", icon=":material/folder_open:"):
-                    open_review(existing["id"])
+                    open_assessment(existing["id"])
+                    st.rerun()
 
         source = st.segmented_control(
             "Documents", ["Sample pack", "Upload documents"], default=saved.get("source", "Sample pack"), key="source"
@@ -407,34 +399,63 @@ if st.session_state.get("screen", "details") == "details":
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:"):
             save_draft(details, documents)
-            st.toast(f"Saved on this computer. Its review ID is {review_id(st.session_state.case_id)}: use it to find "
-                     "this review any time.", icon=":material/check_circle:")
-        if st.button("Next", type="primary", icon=":material/arrow_forward:", disabled=not documents):
+            st.toast(f"Saved on this computer. Its review ID is {review_id(st.session_state.case_id)}: find it any "
+                     "time in KYC Assessments.", icon=":material/check_circle:")
+        if st.button("Save and continue", type="primary", icon=":material/arrow_forward:", disabled=not documents):
             save_draft(details, documents)  # every review is saved, so it can be reopened and amended later
-            st.session_state.screen = "documents"
-            st.rerun()
+            go("documents")
     if not documents:
         st.caption("Add at least one document to continue.")
     elif source == "Upload documents":
-        st.caption(f"Next asks Claude to identify each document (roughly 1p per document, about "
+        st.caption(f"Save and continue asks Claude to identify each document (roughly 1p per document, about "
                    f"${len(documents) * 0.011:.2f} for these {len(documents)}). A reopened draft with the same "
                    "documents costs nothing.")
     st.stop()
 
-# --- Screens 2 to 5: the checks, using the saved details ---
+# --- The assessment's tabs ---
 
-SCREENS = ["details", "documents", "assess", "results"]
-screen = st.session_state.screen if st.session_state.get("screen") in SCREENS else "documents"
+TAB_NAMES = ["Details & documents", "Document intelligence", "Risk assessment", "Evidence review",
+             "Ongoing monitoring", "Audit history"]
+SCREENS = ["details", "documents", "assess", "results", "monitoring", "audit"]
+
+
+def go(to: str) -> None:
+    """Switch to another tab (applied before the tabs are drawn on the next run)."""
+    st.session_state.switch_tab = TAB_NAMES[SCREENS.index(to)]
+    st.rerun()
+
+
+def remember_tab() -> None:
+    st.session_state.current_tab = st.session_state.assessment_tab
+
+
+def make_tabs():
+    """The tabs; only the open tab's content runs, so paid steps start only when their tab is opened. The open tab
+    is remembered, so it stays open after saving or any other change."""
+    if "switch_tab" in st.session_state:
+        st.session_state.current_tab = st.session_state.pop("switch_tab")
+    if st.session_state.get("current_tab") in TAB_NAMES:
+        st.session_state.assessment_tab = st.session_state.current_tab
+    return st.tabs(TAB_NAMES, key="assessment_tab", on_change=remember_tab)
+
+
+if not saved:  # a new assessment: only the details tab can be used until it is saved
+    st.title("New KYC assessment")
+    new_tabs = make_tabs()
+    with new_tabs[0]:
+        if new_tabs[0].open:
+            details_tab()
+    for tab in new_tabs[1:]:
+        with tab:
+            if tab.open:
+                st.info("Fill in **Details & documents** and click **Save and continue** first.",
+                        icon=":material/info:")
+    st.stop()
 
 source = saved["source"]
 entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
 documents = (SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]) + saved.get("supporting", [])
 saved_answers = SAMPLE_ANSWERS if source == "Sample pack" else answer_paths(st.session_state.case_id)
-
-
-def go(to: str) -> None:
-    st.session_state.screen = to
-    st.rerun()
 
 
 def navigation(next_label: str | None = None, next_ready: bool = True, save=None) -> None:
@@ -453,25 +474,70 @@ def navigation(next_label: str | None = None, next_ready: bool = True, save=None
             go(SCREENS[position + 1])
 
 
-with st.container(border=True):
-    with st.container(horizontal=True, vertical_alignment="center"):
-        st.subheader(":material/domain: " + (entity_name or "Legal entity"), width="stretch")
-        if st.button("Edit details", icon=":material/edit:"):
-            go("details")
-    summary = [("Company", company_link), ("FCA FRN", fca_frn), ("Website", website),
-               ("Documents", f"{len(documents)} files")]
-    st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
-    if st.session_state.get("case_id"):
-        st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · "
-                   ":material/cloud_done: Saved on this computer. You can close Clario and reopen this review from "
-                   "Your saved reviews on the Review page.")
-st.caption(f"Step {SCREENS.index(screen) + 1} of {len(SCREENS)}")
+st.title(entity_name or "Legal entity")
+summary = [("Company", company_link), ("FCA FRN", fca_frn), ("Website", website),
+           ("Documents", f"{len(documents)} files")]
+st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
+if st.session_state.get("case_id"):
+    st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · :material/cloud_done: Saved on "
+               "this computer; reopen it any time from KYC Assessments.")
 
 # Start again whenever the set of documents changes
 pack_key = pack_fingerprint(documents)
 # Line reviews, the risk decision and the final approval belong to the review, so adding documents keeps them
 review_key = st.session_state.get("case_id") or pack_key
 audit_path = case_file(review_key, "audit").with_suffix(".jsonl")  # who changed what, and when
+# Each review cycle (onboarding, then each periodic review) has its own line reviews, risk decision and approval
+cycle = current_cycle(review_key)
+cycle_review_key = cycle_key(review_key, cycle)
+
+
+def cycle_name(number: int) -> str:
+    return "Onboarding review" if number == 1 else f"Periodic review {number - 1}"
+
+# --- The assessment's status, and putting it on hold, cancelling, resuming or reopening it ---
+STATUS_COLOURS = {NOT_STARTED: "gray", IN_PROGRESS: "blue", UNDER_REVIEW: "violet", PENDING_APPROVAL: "orange",
+                  APPROVED: "green", REJECTED: "red", ON_HOLD: "orange", CANCELLED: "gray"}
+status_path = case_file(review_key, "status")
+this_case = next((d for d in list_cases() if d["id"] == st.session_state.get("case_id")), None)
+current = summarise(this_case) if this_case else None
+if current:
+    manual = load_status(status_path)
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.badge(current.status, color=STATUS_COLOURS[current.status], help=DEFINITIONS[current.status])
+        if manual:
+            st.caption(f"{manual.status} by {manual.by} on {manual.on}: {manual.reason}")
+        elif current.next_review:
+            st.caption(f"Next review due {current.next_review}")
+        with st.popover("Status", icon=":material/tune:"):
+            if manual:
+                undo = "Resume" if manual.status == ON_HOLD else "Reopen"
+                st.caption(f"This assessment is {manual.status.lower()}. {undo} it to carry on; its status will "
+                           "follow the work again.")
+                who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="status_who")
+                if st.button(undo, type="primary", icon=":material/play_arrow:", disabled=not who.strip()):
+                    clear_status(status_path)
+                    log_event(audit_path, who, f"{'Resumed' if undo == 'Resume' else 'Reopened'} the assessment "
+                              f"(was {manual.status})")
+                    st.rerun()
+            else:
+                action = st.segmented_control("Change the status", [ON_HOLD, CANCELLED], key="status_action",
+                                              format_func=lambda a: "Put on hold" if a == ON_HOLD
+                                              else "Cancel assessment")
+                if action:
+                    st.caption(DEFINITIONS[action])
+                    reason = st.text_area("Reason", key="status_reason", height=80)
+                    who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""),
+                                        key="status_who")
+                    sure = action != CANCELLED or st.checkbox("Yes, cancel this assessment", key="status_sure")
+                    if st.button("Confirm", type="primary", icon=":material/check:", disabled=not sure):
+                        try:
+                            set_status(status_path, action, reason, who)
+                        except ValueError as error:
+                            st.error(str(error), icon=":material/error:")
+                        else:
+                            log_event(audit_path, who, f"Marked the assessment {action}: {reason.strip()}")
+                            st.rerun()
 
 stored_supporting = load_supporting(st.session_state.case_id) if st.session_state.get("case_id") else []
 original_documents = SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]
@@ -484,7 +550,7 @@ def quotes_from(name: str, evidence: list[str]) -> bool:
 
 def lines_review_path() -> Path | None:
     chosen_checklist = st.session_state.get("choice", (None, None))[1]
-    return case_file(review_key, chosen_checklist) if chosen_checklist else None
+    return case_file(cycle_review_key, chosen_checklist) if chosen_checklist else None
 
 
 def dependants(document: UploadedDocument) -> list[str]:
@@ -533,7 +599,7 @@ def delete_documents(chosen: list[tuple[UploadedDocument, dict | None]]) -> None
         entity["documents"] = [d for d in saved["documents"] if d.fingerprint not in originals_gone]
         save_review(st.session_state.case_id, {k: saved[k] for k in DETAIL_FIELDS}, entity["documents"])
         if not entity["documents"]:
-            st.session_state.screen = "details"
+            st.session_state.switch_tab = "Details & documents"
     st.session_state.entity = entity
     st.session_state.pop("delete_pending", None)
 
@@ -593,83 +659,119 @@ def remember(**choices) -> None:
                       st.session_state.get("choice"), comments=st.session_state.get("label_comments"))
 
 
+tabs = make_tabs()
+open_index = next((i for i, tab in enumerate(tabs) if tab.open), 0)
+screen, open_tab = SCREENS[open_index], tabs[open_index]
+
+with tabs[0]:
+    if tabs[0].open:
+        details_tab()
+
+with tabs[5]:
+    if tabs[5].open:
+        events = load_events(audit_path)
+        st.subheader(":material/history: Audit history")
+        st.caption("Every change to this assessment, with who made it and when. Entries are only ever added.")
+        if events:
+            st.dataframe(pd.DataFrame([{"Time": e.at, "Who": e.who, "Line": e.line, "What": e.what} for e in events]),
+                         hide_index=True, column_config={"What": st.column_config.TextColumn(width="large")})
+            st.download_button("Download the audit log (CSV)", events_csv(events), file_name="clario-audit-log.csv",
+                               mime="text/csv", icon=":material/download:")
+        else:
+            st.caption("Nothing recorded yet.")
+        st.stop()
+
+
+def needs_first(tab: str, step: str) -> None:
+    """Shown in the open tab when it needs an earlier tab completed first."""
+    with open_tab:
+        st.info(f"Complete the **{TAB_NAMES[SCREENS.index(step)]}** tab first.", icon=":material/info:")
+        if st.button(f"Go to {TAB_NAMES[SCREENS.index(step)]}", key=f"needs_{tab}_{step}"):
+            go(step)
+    st.stop()
+
+
 # --- Screen 2: what each document is ---
 
 if screen == "documents":
-    with st.container(border=True):
-        st.subheader(":material/plagiarism: Check what each document is")
-        if "identification" not in st.session_state:  # identify straight away when this screen opens
-            with st.spinner(f"Claude is reading the {len(documents)} documents..."):
-                try:
-                    st.session_state.identification = identify_documents(
-                        documents, saved_answer=saved_answers.get("labels"))
-                except (ExtractionFailed, UnsupportedFile) as error:
-                    st.error(f"Could not identify the documents: {error}", icon=":material/error:")
-                    st.button("Try again", icon=":material/refresh:")
-        if "identification" in st.session_state:
-            identification = st.session_state.identification
-            shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
-            description_of = {d.name: d.description for d in documents}
-            st.caption("Change a document type if Claude got it wrong (the checks use these), and add any comments. "
-                       "Open a file's **Details** to see why Claude thinks so.")
-            comments_before = st.session_state.get("label_comments", {})
-            claude_types = {label.name: label.document_type for label in identification.labels}
-            widths = [3, 3, 4]
-            header = st.columns(widths)
-            for column, title in zip(header, ["Document type", "File", "Comments"]):
-                column.markdown(f"**{title}**")
-            confirmed, comments = [], {}
-            for number, label in enumerate(shown):
-                type_side, file_side, comment_side = st.columns(widths, vertical_alignment="center")
-                file_side.markdown(label.name)
-                chosen_type = type_side.selectbox(
-                    f"Document type of {label.name}", list(DOCUMENT_TYPES.values()),
-                    index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
-                    label_visibility="collapsed")
-                type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
-                comment = comment_side.text_input(
-                    f"Comments on {label.name}", value=comments_before.get(label.name, ""),
-                    key=f"label_comment_{pack_key}_{number}", label_visibility="collapsed",
-                    placeholder="Required: why did you change the document type?" if type_changed else "Comments")
-                with st.expander("Details"):
-                    st.markdown(f"**Why Claude thinks so:** {label.reason or 'No reason given.'}")
-                    st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
-                confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
-                if comment.strip():
-                    comments[label.name] = comment.strip()
-            st.caption("Labels: replayed, $0.00" if identification.replayed
-                       else f"Labels: about ${identification.cost_usd:.3f}")
-    def save_labels(quiet: bool = False) -> bool:
-        """Keep the document types and comments, and record what changed in the audit log. A document type
-        changed from Claude's needs a comment; if one is missing nothing is saved."""
-        missing = [label.name for label in confirmed
-                   if label.document_type != claude_types[label.name] and not comments.get(label.name)]
-        if missing:
-            if not quiet:
-                st.error("Add a comment for " + ", ".join(missing) + ": you changed the document type from "
-                         "Claude's.", icon=":material/error:")
-            return False
-        before = {label.name: label for label in shown}
-        who = st.session_state.get("last_reviewer", "")
-        for label in confirmed:
-            if label.document_type != before[label.name].document_type:
-                log_event(audit_path, who, f"Document type of {label.name}: {before[label.name].type_label} → "
-                          f"{label.type_label}")
-            if comments.get(label.name, "") != comments_before.get(label.name, ""):
-                log_event(audit_path, who, f'Comment on {label.name}: "{comments.get(label.name, "")}"')
-        remember(labels=confirmed, label_comments=comments)
-        return True
+    with tabs[1]:
+        with st.container(border=True):
+            st.subheader(":material/plagiarism: Check what each document is")
+            if "identification" not in st.session_state:  # identify straight away when this screen opens
+                with st.spinner(f"Claude is reading the {len(documents)} documents..."):
+                    try:
+                        st.session_state.identification = identify_documents(
+                            documents, saved_answer=saved_answers.get("labels"))
+                        found = st.session_state.identification
+                        log_event(audit_path, "Clario", f"Identified {len(found.labels)} documents"
+                                  + (" (saved answer replayed, no cost)" if found.replayed else f" (about ${found.cost_usd:.3f})"))
+                    except (ExtractionFailed, UnsupportedFile) as error:
+                        st.error(f"Could not identify the documents: {error}", icon=":material/error:")
+                        st.button("Try again", icon=":material/refresh:")
+            if "identification" in st.session_state:
+                identification = st.session_state.identification
+                shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
+                description_of = {d.name: d.description for d in documents}
+                st.caption("Change a document type if Claude got it wrong (the checks use these), and add any comments. "
+                           "Open a file's **Details** to see why Claude thinks so.")
+                comments_before = st.session_state.get("label_comments", {})
+                claude_types = {label.name: label.document_type for label in identification.labels}
+                widths = [3, 3, 4]
+                header = st.columns(widths)
+                for column, title in zip(header, ["Document type", "File", "Comments"]):
+                    column.markdown(f"**{title}**")
+                confirmed, comments = [], {}
+                for number, label in enumerate(shown):
+                    type_side, file_side, comment_side = st.columns(widths, vertical_alignment="center")
+                    file_side.markdown(label.name)
+                    chosen_type = type_side.selectbox(
+                        f"Document type of {label.name}", list(DOCUMENT_TYPES.values()),
+                        index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
+                        label_visibility="collapsed")
+                    type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
+                    comment = comment_side.text_input(
+                        f"Comments on {label.name}", value=comments_before.get(label.name, ""),
+                        key=f"label_comment_{pack_key}_{number}", label_visibility="collapsed",
+                        placeholder="Required: why did you change the document type?" if type_changed else "Comments")
+                    with st.expander("Details"):
+                        st.markdown(f"**Why Claude thinks so:** {label.reason or 'No reason given.'}")
+                        st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
+                    confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
+                    if comment.strip():
+                        comments[label.name] = comment.strip()
+                st.caption("Labels: replayed, $0.00" if identification.replayed
+                           else f"Labels: about ${identification.cost_usd:.3f}")
+        def save_labels(quiet: bool = False) -> bool:
+            """Keep the document types and comments, and record what changed in the audit log. A document type
+            changed from Claude's needs a comment; if one is missing nothing is saved."""
+            missing = [label.name for label in confirmed
+                       if label.document_type != claude_types[label.name] and not comments.get(label.name)]
+            if missing:
+                if not quiet:
+                    st.error("Add a comment for " + ", ".join(missing) + ": you changed the document type from "
+                             "Claude's.", icon=":material/error:")
+                return False
+            before = {label.name: label for label in shown}
+            who = st.session_state.get("last_reviewer", "")
+            for label in confirmed:
+                if label.document_type != before[label.name].document_type:
+                    log_event(audit_path, who, f"Document type of {label.name}: {before[label.name].type_label} → "
+                              f"{label.type_label}")
+                if comments.get(label.name, "") != comments_before.get(label.name, ""):
+                    log_event(audit_path, who, f'Comment on {label.name}: "{comments.get(label.name, "")}"')
+            remember(labels=confirmed, label_comments=comments)
+            return True
 
-    navigation("Next", "identification" in st.session_state, save=save_labels)
-    if source == "Upload documents":
-        st.caption("Next asks Claude to suggest the industry and an initial risk rating (roughly 13-18p together). A "
-                   "reopened review with unchanged documents costs nothing.")
-    st.stop()
+        navigation("Next", "identification" in st.session_state, save=save_labels)
+        if source == "Upload documents":
+            st.caption("Next asks Claude to suggest the industry and an initial risk rating (roughly 13-18p together). A "
+                       "reopened review with unchanged documents costs nothing.")
+        st.stop()
 
 confirmed = st.session_state.get("labels") or []
 identification = st.session_state.get("identification")
 if not confirmed or identification is None:
-    go("documents")
+    needs_first(screen, "documents")
 
 # --- Screen 3: industry and initial risk rating, which together pick the checklist ---
 
@@ -688,593 +790,764 @@ LEVEL_MEANING = {
 def checklist_size(key: str) -> int:
     return len(load_checks(CHECKLISTS[key][1]))
 
-decision_path = case_file(review_key, "risk-decision")
+decision_path = case_file(cycle_review_key, "risk-decision")
 links_key = (tuple(confirmed), company_link.strip(), website.strip(), fca_frn.strip())
 if st.session_state.get("industry") and st.session_state.industry[0] != links_key:
     st.session_state.pop("industry")  # documents, labels or links changed
     st.session_state.pop("choice", None)
 
 if screen == "assess":
-    sources, link_warnings = fetch_links(company_link, website, fca_frn)
-    for warning in link_warnings:
-        st.warning(warning, icon=":material/warning:")
-    if "industry" not in st.session_state:  # both suggestions start straight away when this screen opens
-        with st.spinner("Claude is reading the questionnaire, the registers and the website to work out the "
-                        "industry..."):
-            try:
-                st.session_state.industry = (links_key, suggest_industry(
-                    documents, confirmed, sources, saved_answer=saved_answers.get("industry")))
-            except (ExtractionFailed, UnsupportedFile) as error:
-                st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
-                st.button("Try again", icon=":material/refresh:")
-                navigation()
-                st.stop()
-    suggestion = st.session_state.industry[1]
-    risk_key = (pack_key, tuple(confirmed), suggestion.industry, tuple(sources))
-    if st.session_state.get("risk", (None,))[0] != risk_key:
-        with st.spinner("Claude is rating the risk from the ownership and business documents, the registers and the "
-                        "website..."):
-            try:
-                st.session_state.risk = (risk_key, suggest_risk(
-                    documents, confirmed, INDUSTRIES[suggestion.industry], sources,
-                    saved_answer=saved_answers.get("risk"),
-                    update_saved=source != "Sample pack"))  # the sample's free demo answer is never replaced
-            except (ExtractionFailed, UnsupportedFile) as error:
-                st.error(f"Could not suggest a risk rating: {error}", icon=":material/error:")
-                st.button("Try again", icon=":material/refresh:")
-                navigation()
-                st.stop()
-    risk = st.session_state.risk[1]
-    decision = load_risk_decision(decision_path)
-    chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
-    if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
-        chosen_industry = suggestion.industry
-
-    st.subheader(":material/fact_check: Industry, risk rating and checklist")
-    st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Claude's "
-               "reasons and evidence.")
-
-    # Risk rating on the left, industry and checklist on the right. The right-hand card is filled first because the
-    # risk card needs to know which industry was chosen.
-    risk_column, industry_column = st.columns([1, 2])
-    # --- Industry and checklist, side by side in one box: only the industry can be overridden ---
-    with industry_column.container(border=True):
-        industry_side, checklist_side = st.columns(2)
-        with industry_side:
-            st.markdown("**:material/domain: Industry**")
-            st.caption("Clario suggests")
-            st.markdown(f"#### {suggestion.industry_label}")
-            if suggestion.sources_agree == "no":
-                st.badge("Sources disagree", icon=":material/warning:", color="orange")
-            industry = INDUSTRY_KEY[st.selectbox(
-                "Override Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
-                key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
-            )]
-            with st.expander("Why this industry?"):
-                st.markdown(suggestion.reason)
-                if suggestion.sources_agree == "no":
-                    st.warning(f"**The sources disagree.** {suggestion.disagreement}", icon=":material/warning:")
-                else:
-                    st.caption(SOURCES_AGREE[suggestion.sources_agree])
-                if suggestion.evidence:
-                    st.markdown("**Evidence**\n" + "\n".join(f"- {quote}" for quote in suggestion.evidence))
-                st.caption("Replayed, $0.00" if suggestion.replayed else f"About ${suggestion.cost_usd:.3f}")
-        with checklist_side:
-            st.markdown("**:material/checklist: Checklist**")
-            checklist_slot = st.container()  # filled in below, once the risk rating is known
-
-    # --- Risk rating ---
-    with risk_column.container(border=True):
-        st.markdown("**:material/speed: Risk rating**")
-        st.caption("Clario suggests")
-        st.markdown(f"#### :{RATING_COLOURS[risk.overall]}[{risk.overall}]")
-        with st.container(horizontal=True):
-            for found in risk.triggers:
-                st.badge(f"EDD trigger {found.trigger.id}", icon=":material/priority_high:", color="red")
-            if risk.flagged:
-                st.badge(f"{len(risk.flagged)} factor(s) need evidence", icon=":material/help:", color="gray")
-            if industry != suggestion.industry:
-                st.badge("Based on the suggested industry", icon=":material/info:", color="blue")
-        final = st.segmented_control(
-            "Override Rating", RATINGS, required=True, key=f"final_{pack_key}",
-            default=decision.rating if decision else risk.overall,
-            help="Keep Clario's suggestion or override it. An override needs a sign-off (below).")
-        with st.expander("Why this rating?"):
-            st.markdown(f"**{risk.why}.** Rules: any EDD trigger makes it High; otherwise the highest factor "
-                        "wins; a factor without enough evidence counts as Medium.")
-            if industry != suggestion.industry:
-                st.info(f"This rating was based on the suggested industry ({suggestion.industry_label}). You "
-                        f"chose {INDUSTRIES[industry]}: review the rating and override it if needed.",
-                        icon=":material/info:")
-            for found in risk.triggers:
-                st.warning(f"**EDD trigger {found.trigger.id}: {found.trigger.text}** ({found.trigger.kind})  \n"
-                           f"{found.reasons}" + "".join(f"  \n> {quote}" for quote in found.evidence),
-                           icon=":material/priority_high:")
-            for rated in risk.factors:
-                st.markdown(f"**{rated.factor.name}** :{RATING_COLOURS[rated.rating]}-badge[{rated.rating}]  \n"
-                            f"{rated.reasons}")
-                if rated.evidence:
-                    st.caption("\n".join(f"- {quote}" for quote in rated.evidence))
-            st.caption("Replayed, $0.00" if risk.replayed else f"About ${risk.cost_usd:.3f}")
-
-    # The checklist follows the industry and the risk rating; it cannot be changed on its own
-    checklist, written_for_industry = checklist_for(industry, final)
-    with checklist_slot:
-        st.caption("Set by the industry and risk rating")
-        st.markdown(f"#### {CHECKLISTS[checklist][0]}")
-        if not written_for_industry:
-            st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
-        with st.expander("Why this checklist?"):
-            st.markdown(f"Set from the industry (**{INDUSTRIES[industry]}**) and the risk rating (**{final}**).  \n"
-                        f"{LEVEL_MEANING[final]}")
-            st.caption(f"{checklist_size(checklist)} checks.")
-            if not written_for_industry:
-                st.caption("There is no checklist written for this industry yet, so the fintech one is used.")
-
-    # --- Sign-off: only when the analyst overrides Clario's suggested rating ---
-    reason, reviewer, evidence_link, evidence = "", "", "", None
-    if final != risk.overall:
-        overridden_before = decision and decision.overridden
-        with st.container(border=True):
-            st.markdown("**:material/gavel: AML senior officer sign-off for the override**")
-            st.caption(f":material/edit: You are overriding Clario's suggested rating ({risk.overall}) with {final}. "
-                       "An AML senior officer must sign this off, with evidence of the sign-off.")
-            reason = st.text_area("Reason", value=decision.reason if overridden_before else "",
-                                  key=f"reason_{pack_key}", height=80)
-            reviewer = st.text_input("AML senior officer", key=f"reviewer_{pack_key}",
-                                     value=decision.reviewer if overridden_before else "",
-                                     help="Name of the AML senior officer who signed off the override.")
-            st.markdown("**Evidence of the sign-off** (a document, a link, or both)")
-            with st.container(horizontal=True):
-                upload = st.file_uploader("Sign-off document", key=f"evidence_{pack_key}",
-                                          type=["pdf", "png", "jpg", "jpeg", "docx", "msg", "eml"],
-                                          help="For example the signed form, or the approval email saved as a PDF.")
-                evidence_link = st.text_input(
-                    "Or a link to the folder where the evidence is saved", key=f"evidence_link_{pack_key}",
-                    value=decision.evidence_link if overridden_before else "",
-                    placeholder="e.g. https://yourfirm.sharepoint.com/sites/kyc/EXAMPLE-PAYMENTS")
-            if upload:
-                evidence = (upload.name, upload.getvalue())
-            elif overridden_before and decision.evidence_document and evidence_path(decision_path).exists():
-                with st.container(horizontal=True, vertical_alignment="center"):
-                    st.caption(f":material/attach_file: On file: {decision.evidence_document}. Upload a new "
-                               "document to replace it.")
-                    st.download_button("Download", evidence_path(decision_path).read_bytes(),
-                                       file_name=decision.evidence_document, icon=":material/download:",
-                                       key=f"evidence_download_{pack_key}")
-
-    with st.container(horizontal=True):
-        if st.button("Back", icon=":material/arrow_back:", key="back_assess"):
-            go("documents")
-        if st.button("Next", type="primary", icon=":material/arrow_forward:", key="next_assess"):
-            try:
-                saved_decision = save_risk_decision(decision_path, final, risk.overall, reason, reviewer,
-                                                    evidence_link=evidence_link, evidence=evidence)
-            except ValueError as error:
-                st.error(str(error), icon=":material/error:")
-            else:
-                before = (decision.rating, decision.reason, decision.reviewer, decision.evidence_link,
-                          decision.evidence_document) if decision else None
-                after = (saved_decision.rating, saved_decision.reason, saved_decision.reviewer,
-                         saved_decision.evidence_link, saved_decision.evidence_document)
-                if before != after:
-                    if saved_decision.overridden:
-                        evidence_given = " and ".join(e for e in (saved_decision.evidence_document,
-                                                                  saved_decision.evidence_link) if e)
-                        log_event(audit_path, saved_decision.reviewer,
-                                  f"Overrode the risk rating {risk.overall} → {final}, signed off as AML senior "
-                                  f"officer: {saved_decision.reason} (evidence: {evidence_given})")
-                    else:
-                        log_event(audit_path, st.session_state.get("last_reviewer", ""),
-                                  f"Confirmed Clario's risk rating {final}")
-                if st.session_state.get("choice", (None, None)) != (industry, checklist):
-                    log_event(audit_path, st.session_state.get("last_reviewer", ""),
-                              f"Industry {INDUSTRIES[industry]}"
-                              + (f" (Clario suggested {suggestion.industry_label})" if industry != suggestion.industry
-                                 else "") + f"; checklist {CHECKLISTS[checklist][0]}")
-                remember(choice=(industry, checklist))
-                go("results")
-    if source == "Upload documents":
-        st.caption(f"Next saves your choices and runs the KYC checks: Claude reads every document again against the "
-                   f"checklist (roughly 3p per document, about ${len(documents) * 0.027:.2f} for these "
-                   f"{len(documents)}). A reopened review with unchanged documents and checklist costs nothing.")
-    elif checklist != SAMPLE_CHECKLIST:
-        st.caption(f":material/payments: The sample's saved answer is for the {CHECKLISTS[SAMPLE_CHECKLIST][0]} "
-                   "checklist. With this checklist, Next asks Claude to run the checks again (about 20p).")
-    st.stop()
-
-decision = load_risk_decision(decision_path)
-if "industry" not in st.session_state or not st.session_state.get("choice", (None, None))[1] or decision is None:
-    go("assess")
-suggestion = st.session_state.industry[1]
-industry, checklist = st.session_state.choice
-
-# Results no longer match if the labels or the checklist changed
-if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
-    st.session_state.pop("assessment")
-
-# --- Screen 5: results. The checks run as this screen opens, then the results appear ---
-
-if "assessment" not in st.session_state:
-    replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
-    sources, _ = fetch_links(company_link, website, fca_frn)
-    with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the "
-                    f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
-        try:
-            st.session_state.assessment = ((confirmed, checklist), assess_pack(
-                documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
-                saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None,
-            ))
-        except ExtractionFailed as error:
-            st.error(f"Could not run the checks: {error}", icon=":material/error:")
-            st.button("Try again", icon=":material/refresh:")
-            navigation()
-            st.stop()
-original = st.session_state.assessment[1]
-
-# The analyst's saved changes for this set of documents and checklist
-review_path = case_file(review_key, checklist)
-overrides = load_overrides(review_path)
-# The legal entity name rule on check 1.1, then the analyst's changes, which always have the final say
-named = apply_entity_name(original, entity_name, parse_company_number(company_link), lookup=cached_company)
-result = apply_overrides(named, overrides)
-
-approval_path = case_file(review_key, "final-approval")
-approval = load_approval(approval_path)
-
-# Step 4 reviews sections 1 to 6. Section 7 (risk rating and escalation) is covered by step 3, the final approval
-# and the audit log, so it is not shown. Section 8 (ongoing monitoring) comes after the final approval.
-RISK_SECTION, ONGOING_SECTION = "7.", "8."
-review_outcomes = [o for o in result.outcomes if not o.check.section.startswith((RISK_SECTION, ONGOING_SECTION))]
-ongoing_outcomes = [o for o in result.outcomes if o.check.section.startswith(ONGOING_SECTION)]
-REVIEW_YEARS = {"Low": 3, "Medium": 2, "High": 1}  # review frequency from the risk methodology
-
-st.header("Results")
-with st.container(border=True, horizontal=True, vertical_alignment="center"):
-    with st.container():
-        st.caption("Risk rating")
-        st.markdown(f"#### :{RATING_COLOURS[decision.rating]}[{decision.rating}]")
-        if decision.overridden:
-            st.caption(f"Overriding Clario's {decision.suggested}; signed off by {decision.reviewer}, AML senior "
-                       "officer")
-    with st.container():
-        st.caption("Checklist")
-        st.markdown(f"#### {CHECKLISTS[checklist][0]}")
-        st.caption(f"{len(result.outcomes)} checks · Industry: {INDUSTRIES[industry]}")
-    with st.container():
-        st.caption("Final approval")
-        if approval:
-            st.markdown(f"#### :green[Approved]")
-            st.caption(f"By {approval.approver} on {approval.approved_on}")
-        else:
-            st.markdown("#### :orange[Awaiting]")
-            st.caption("Senior management approves at the end of this page")
-total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
-st.caption("Checks: replayed, $0.00" if original.replayed
-           else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
-with st.container(horizontal=True):
-    for status, help_text in [
-        (Status.PRESENT, "The evidence is there and consistent"),
-        (Status.MISSING, "Not provided"),
-        (Status.UNCLEAR, "Incomplete, out of date or inconsistent"),
-        (Status.NEEDS_HUMAN_REVIEW, "A judgement call for an analyst"),
-        (Status.NOT_STARTED, "Screening and analyst decisions, done outside this tool"),
-    ]:
-        st.metric(STATUS_TEXT[status], sum(o.status is status for o in review_outcomes), help=help_text,
-                  border=True)
-
-left, right = st.columns(2)
-for column, title, icon, gaps, empty in [
-    (left, "Request from client", ":material/mail:", result.request_from_client(), "Nothing to request."),
-    (right, "Check on public registers", ":material/account_balance:", result.check_on_registers(), "Nothing to check."),
-]:
-    with column.container(border=True):
-        st.subheader(f"{icon} {title}")
-        if not gaps:
-            st.success(empty, icon=":material/check_circle:")
-        for outcome in gaps:
-            st.markdown(f"**{outcome.check.id} · {outcome.check.evidence_source}**  \n{outcome.finding}")
-
-# --- Every check, validated line by line ---
-
-st.subheader("Every check, by section")
-st.caption(
-    "For each line: tick **Validated** once you have checked it, change the **Status** if you disagree (a "
-    "**comment** is then required), and open **Details** for the finding, Claude's view, who decided and the "
-    "evidence, or to upload supporting documents. Then click **Save review**. :material/lock: Saved on this computer "
-    "only."
-)
-validated_count = sum(bool(o.validated_by) for o in review_outcomes)
-st.progress(validated_count / len(review_outcomes),
-            text=f"{validated_count} of {len(review_outcomes)} lines validated")
-
-supporting_by_check, supporting_documents = {}, {}
-if st.session_state.get("case_id"):
-    for document, record in load_supporting(st.session_state.case_id):
-        supporting_by_check.setdefault(record["check_id"], []).append(record)
-        supporting_documents[document.fingerprint] = (document, record)
-in_this_run = {d.fingerprint for d in documents}
-section_reads = st.session_state.setdefault("section_reads", {})  # section -> documents its re-run has read
-not_yet_read = [r for _, r in supporting_documents.values() if r["sha256"] not in in_this_run]
-if not_yet_read:
-    with st.container(border=True):
-        st.info(f"{len(not_yet_read)} supporting document(s) added since the checks ran: "
-                + ", ".join(r["name"] for r in not_yet_read) + ". Re-run the section they belong to (button in each "
-                "section), or re-run all the checks, so Claude reads them with the rest of the documents.",
-                icon=":material/attach_file:")
-        if st.button("Re-run all the checks with the new documents", icon=":material/refresh:"):
-            st.session_state.entity = {**saved, "supporting": [d for d, _ in supporting_documents.values()]}
-            go("documents")
-        st.caption(f"Re-running everything reads every document again, with the industry and risk rating (about "
-                   f"${(len(documents) + len(not_yet_read)) * 0.027 + 0.15:.2f}). Your line reviews are kept.")
-
-
-def rerun_section(section: str, check_ids: set[str], unread: list[tuple[UploadedDocument, dict]]) -> None:
-    """Re-check one section with every document, including supporting ones Claude has not read yet."""
-    extra_docs = [document for document, _ in unread]
-    extra_labels = [DocumentLabel(document.name, "other", f"Supporting document added for check {record['check_id']}")
-                    for document, record in unread]
-    sources, _ = fetch_links(company_link, website, fca_frn)
-    with st.spinner(f"Claude is re-checking {section} with {len(documents) + len(extra_docs)} documents..."):
-        partial = assess_pack(documents + extra_docs, confirmed + extra_labels, sources,
-                              checklist=CHECKLISTS[checklist][1], only=check_ids)
-    new_lines = {o.check.id: o for o in partial.outcomes}
-    key, current = st.session_state.assessment
-    st.session_state.assessment = (key, replace(
-        current, outcomes=[new_lines.get(o.check.id, o) for o in current.outcomes], replayed=False,
-        input_tokens=current.input_tokens + partial.input_tokens,
-        output_tokens=current.output_tokens + partial.output_tokens))
-    section_reads[section] = section_reads.get(section, set()) | {d.fingerprint for d in extra_docs}
-    log_event(audit_path, st.session_state.get("last_reviewer", ""),
-              "Re-ran the section with " + ", ".join(d.name for d in extra_docs), section)
-
-
-reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""), width=300,
-                         help="Your name, recorded against every line you validate or change.")
-line_versions = st.session_state.setdefault("line_versions", {})  # a line's fields start fresh after it is saved
-
-
-def is_changed(line) -> bool:
-    o, status, validated, comment, uploads, _ = line
-    return (status, validated, comment) != (o.status, bool(o.validated_by), o.reviewer_note) or bool(uploads)
-
-
-def save_lines(selected: list) -> list[str]:
-    """Save these lines: status, tick and comment, then add any uploaded documents, which Claude reads against
-    their line and can set to Present. Returns problems; nothing is saved if there are any."""
-    touched = [(o.check.id, status, comment, validated) for o, status, validated, comment, _, _ in selected
-               if (status, validated, comment) != (o.status, bool(o.validated_by), o.reviewer_note)]
-    uploads_for = [(o, comment, validated, upload, description)
-                   for o, _, validated, comment, uploads, description in selected for upload in uploads]
-    problems = save_line_reviews(review_path, named, touched, reviewer)
-    if uploads_for and not st.session_state.get("case_id"):
-        problems.append("Save the review (Next on the first screen) before adding supporting documents")
-    if problems:
-        return problems
-    shown = {o.check.id: o for o, *_ in selected}
-    for check_id, status, comment, validated in touched:
-        o = shown[check_id]
-        log_event(audit_path, reviewer, describe_line_change(o.status.value, status.value, bool(o.validated_by),
-                                                              validated, o.reviewer_note, comment), check_id)
-    changed_by_you = {check_id for check_id, status, _, _ in touched if status is not shown[check_id].status}
-    for o, comment, validated, upload, description in uploads_for:
-        document = UploadedDocument(upload.name, upload.getvalue(), upload.type or "application/pdf")
-        verdict = None
-        if o.status is not Status.PRESENT:  # Claude reads it against this one line
-            with st.spinner(f"Claude is reading {document.name} against check {o.check.id}..."):
+    with tabs[2]:
+        sources, link_warnings = fetch_links(company_link, website, fca_frn)
+        for warning in link_warnings:
+            st.warning(warning, icon=":material/warning:")
+        if "industry" not in st.session_state:  # both suggestions start straight away when this screen opens
+            with st.spinner("Claude is reading the questionnaire, the registers and the website to work out the "
+                            "industry..."):
                 try:
-                    verdict = read_supporting_document(o.check, o.finding, document, description)
+                    st.session_state.industry = (links_key, suggest_industry(
+                        documents, confirmed, sources, saved_answer=saved_answers.get("industry")))
+                    suggested = st.session_state.industry[1]
+                    log_event(audit_path, "Clario", f"Suggested the industry: {suggested.industry_label}"
+                              + (" (saved answer replayed, no cost)" if suggested.replayed else f" (about ${suggested.cost_usd:.3f})"))
                 except (ExtractionFailed, UnsupportedFile) as error:
-                    st.warning(f"{document.name} was added, but Claude could not read it ({error}).",
-                               icon=":material/warning:")
-        add_supporting_document(st.session_state.case_id, document, o.check.id, reviewer,
-                                verdict=verdict.label if verdict else "",
-                                verdict_finding=verdict.finding if verdict else "", description=description)
-        log_event(audit_path, reviewer, f"Added supporting document {document.name}"
-                  + (f' ("{description.strip()}")' if description.strip() else ""), o.check.id)
-        if verdict and verdict.satisfies == "yes" and o.check.id not in changed_by_you:
-            explanation = verdict.finding + "".join(f" {quote}" for quote in verdict.evidence[:1])
-            note = (f"{comment.strip()} (Claude, from {document.name}: {explanation})" if comment.strip()
-                    else f"Claude, from {document.name}: {explanation}")
-            save_override(review_path, named, o.check.id, Status.PRESENT, note, reviewer or "Clario",
-                          validated=validated, via=document.name)
-        if verdict:
-            log_event(audit_path, "Claude", f"Read {document.name}: {verdict.label}"
-                      + (f" → status {o.status.value} → Present" if verdict.satisfies == "yes"
-                         and o.check.id not in changed_by_you else ""), o.check.id)
-    if reviewer.strip():
-        st.session_state.last_reviewer = reviewer.strip()
-    for o, *_ in selected:
-        line_versions[o.check.id] = line_versions.get(o.check.id, 0) + 1
-    return []
-
-
-lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
-
-
-def render_line(o) -> None:
-    """One checklist line: status, tick, comment and Save, with Details and a supporting document."""
-    key = f"{review_path.stem}_{o.check.id}_{line_versions.get(o.check.id, 0)}"
-    with st.container(border=True):
-        text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
-        text_side.markdown(f"**{o.check.id}** {o.check.check}")
-        status = STATUS_FROM_TEXT[status_side.selectbox(
-            "Status", list(STATUS_TEXT.values()), index=list(STATUS_TEXT).index(o.status),
-            key=f"status_{key}", label_visibility="collapsed")]
-        validated = tick_side.checkbox("Validated", value=bool(o.validated_by), key=f"validated_{key}")
-        comment_side, line_save_side = st.columns([6, 1], vertical_alignment="center")
-        comment = comment_side.text_input(
-            "Comment", value=o.reviewer_note, key=f"comment_{key}", label_visibility="collapsed",
-            placeholder="Comment (required if you change the status)")
-        with st.expander("Details"):
-            st.markdown(f"**Finding:** {o.finding}")
-            if o.claude_finding:
-                st.markdown(f"**Claude's view:** {o.claude_finding}")
-            st.markdown(f"**Decided by:** {o.decided_by}"
-                        + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
-            if o.before_review:
-                st.markdown(f"**Before the change:** {o.before_review}")
-            st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
-                                            if o.evidence else " none quoted"))
-            for record in supporting_by_check.get(o.check.id, []):
-                st.caption(f":material/attach_file: Supporting document: {record['name']}"
-                           + (f" ({record['description']})" if record.get("description") else "")
-                           + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
-                           + f" on {record['added_on']}"
-                           + (f". Claude: {record['verdict']}. {record.get('verdict_finding', '')}"
-                              if record.get("verdict") else ""))
-        # Add a supporting document: upload, describe it and save, in a fold-out section
-        with st.expander("Upload supporting document", icon=":material/attach_file:"):
-            uploads = st.file_uploader(
-                "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
-                help="Added to the review's document store when you save this line.")
-            description = st.text_input(
-                "What does this document show? (optional)", key=f"description_{key}",
-                placeholder="e.g. Updated register of members, dated 20 Oct 2026",
-                help="Claude reads this with the document to understand what it is for.")
-            if uploads and o.status is not Status.PRESENT:
-                st.caption(":material/smart_toy: When you save, Claude reads the document against this "
-                           "check (roughly 1-3p) and sets the line to Present if it provides the evidence.")
-            upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
-                                    disabled=not uploads, help="Add the document and save this line.")
-        line = (o, status, validated, comment or "", uploads or [], description or "")
-        lines.append(line)
-        line_save = line_save_side.button("Save", icon=":material/save:", key=f"save_{key}",
-                                          disabled=not is_changed(line), help="Save this line now.",
-                                          width="stretch")
-        if line_save or upload_save:
-            problems = save_lines([line])
-            if problems:
-                st.error("Not saved:\n" + "\n".join(f"- {problem}" for problem in problems),
-                         icon=":material/error:")
-            else:
-                st.rerun()
-
-
-
-for section, outcomes in groupby(review_outcomes, key=lambda o: o.check.section):
-    outcomes = list(outcomes)
-    present = sum(o.status is Status.PRESENT for o in outcomes)
-    open_issues = sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in outcomes)
-    done = sum(bool(o.validated_by) for o in outcomes)
-    label = (f"{section} · {present} of {len(outcomes)} present · {done} of {len(outcomes)} validated"
-             + (f" · {open_issues} to look at" if open_issues else ""))
-    section_ids = {o.check.id for o in outcomes}
-    unread = [(document, record) for document, record in supporting_documents.values()
-              if record["check_id"] in section_ids and document.fingerprint not in in_this_run
-              and document.fingerprint not in section_reads.get(section, set())]
-    with st.expander(label, expanded=open_issues > 0 or bool(unread)):
-        if unread:
-            with st.container(horizontal=True, vertical_alignment="center"):
-                st.caption(f":material/attach_file: New in this section: {', '.join(d.name for d, _ in unread)}. "
-                           f"Re-run it so Claude reads them with the other documents (roughly 10-15p).",
-                           width="stretch")
-                if st.button("Re-run this section", icon=":material/refresh:", key=f"rerun_{section}"):
-                    try:
-                        rerun_section(section, section_ids, unread)
-                    except ExtractionFailed as error:
-                        st.error(f"Could not re-run the section: {error}", icon=":material/error:")
-                    else:
-                        st.rerun()
-        for o in outcomes:
-            render_line(o)
-
-changed = [line for line in lines if is_changed(line)]
-with st.container(horizontal=True, vertical_alignment="center"):
-    if st.button("Save review", type="primary", icon=":material/save:", disabled=not changed,
-                 help="Save every changed line at once."):
-        problems = save_lines(changed)
-        if problems:
-            st.error("Nothing was saved yet:\n" + "\n".join(f"- {problem}" for problem in problems),
-                     icon=":material/error:")
-        else:
-            st.rerun()
-    st.caption(f"{len(changed)} line(s) with unsaved changes." if changed else "No unsaved changes.")
-
-def undo_line(check_id: str) -> None:
-    remove_override(review_path, check_id)
-    log_event(audit_path, reviewer, "Undid the review of this line", check_id)
-
-
-if overrides:
-    with st.expander(f"Saved reviews of lines ({len(overrides)})"):
-        for change in overrides.values():
-            with st.container(horizontal=True, vertical_alignment="center"):
-                what = (f"{change.original_status.value} → **{change.status.value}**"
-                        if change.status is not change.original_status else "validated")
-                st.markdown(f"**{change.check_id}** · {what} by {change.reviewer} on {change.reviewed_on}"
-                            + (f": {change.note}" if change.note else ""), width="stretch")
-                st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
-                          on_click=undo_line, args=(change.check_id,))
-
-# --- Final approval by senior management, needed for every review ---
-
-def withdraw(who: str) -> None:
-    withdraw_approval(approval_path)
-    log_event(audit_path, who, f"Withdrew the approval given by {approval.approver} on {approval.approved_on}")
-
-
-with st.container(border=True):
-    st.subheader(":material/verified: Final approval")
-    if approval:
-        st.success(f"**Approved by {approval.approver}** on {approval.approved_on}"
-                   + (f": {approval.note}" if approval.note else "."), icon=":material/verified:")
-        st.button("Withdraw approval", icon=":material/undo:", on_click=withdraw, args=(reviewer,),
-                  help="Recorded in the audit log under the Reviewer name at the top of the checklist.")
-    else:
-        st.caption("Every review needs senior management approval before the client is onboarded.")
-        remaining = len(review_outcomes) - validated_count
-        if remaining:
-            st.warning(f"{remaining} of {len(review_outcomes)} lines have not been validated yet.",
-                       icon=":material/checklist:")
-        with st.form("final_approval"):
-            approver = st.text_input("Senior manager")
-            approval_note = st.text_area("Note (optional)", height=80,
-                                         placeholder="e.g. Approved subject to source of wealth evidence")
-            if st.form_submit_button("Approve review", type="primary", icon=":material/verified:"):
+                    st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
+                    st.button("Try again", icon=":material/refresh:")
+                    navigation()
+                    st.stop()
+        suggestion = st.session_state.industry[1]
+        risk_key = (pack_key, tuple(confirmed), suggestion.industry, tuple(sources))
+        if st.session_state.get("risk", (None,))[0] != risk_key:
+            with st.spinner("Claude is rating the risk from the ownership and business documents, the registers and the "
+                            "website..."):
                 try:
-                    approve_review(approval_path, approver, approval_note)
+                    st.session_state.risk = (risk_key, suggest_risk(
+                        documents, confirmed, INDUSTRIES[suggestion.industry], sources,
+                        saved_answer=saved_answers.get("risk"),
+                        update_saved=source != "Sample pack"))  # the sample's free demo answer is never replaced
+                    rated = st.session_state.risk[1]
+                    log_event(audit_path, "Clario", f"Rated the risk: {rated.overall} ({rated.why})"
+                              + (" (saved answer replayed, no cost)" if rated.replayed else f" (about ${rated.cost_usd:.3f})"))
+                except (ExtractionFailed, UnsupportedFile) as error:
+                    st.error(f"Could not suggest a risk rating: {error}", icon=":material/error:")
+                    st.button("Try again", icon=":material/refresh:")
+                    navigation()
+                    st.stop()
+        risk = st.session_state.risk[1]
+        decision = load_risk_decision(decision_path)
+        chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
+        if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
+            chosen_industry = suggestion.industry
+
+        st.subheader(":material/fact_check: Industry, risk rating and checklist")
+        st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Claude's "
+                   "reasons and evidence.")
+
+        # Risk rating on the left, industry and checklist on the right. The right-hand card is filled first because the
+        # risk card needs to know which industry was chosen.
+        risk_column, industry_column = st.columns([1, 2])
+        # --- Industry and checklist, side by side in one box: only the industry can be overridden ---
+        with industry_column.container(border=True):
+            industry_side, checklist_side = st.columns(2)
+            with industry_side:
+                st.markdown("**:material/domain: Industry**")
+                st.caption("Clario suggests")
+                st.markdown(f"#### {suggestion.industry_label}")
+                if suggestion.sources_agree == "no":
+                    st.badge("Sources disagree", icon=":material/warning:", color="orange")
+                industry = INDUSTRY_KEY[st.selectbox(
+                    "Override Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
+                    key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
+                )]
+                with st.expander("Why this industry?"):
+                    st.markdown(suggestion.reason)
+                    if suggestion.sources_agree == "no":
+                        st.warning(f"**The sources disagree.** {suggestion.disagreement}", icon=":material/warning:")
+                    else:
+                        st.caption(SOURCES_AGREE[suggestion.sources_agree])
+                    if suggestion.evidence:
+                        st.markdown("**Evidence**\n" + "\n".join(f"- {quote}" for quote in suggestion.evidence))
+                    st.caption("Replayed, $0.00" if suggestion.replayed else f"About ${suggestion.cost_usd:.3f}")
+            with checklist_side:
+                st.markdown("**:material/checklist: Checklist**")
+                checklist_slot = st.container()  # filled in below, once the risk rating is known
+
+        # --- Risk rating ---
+        with risk_column.container(border=True):
+            st.markdown("**:material/speed: Risk rating**")
+            st.caption("Clario suggests")
+            st.markdown(f"#### :{RATING_COLOURS[risk.overall]}[{risk.overall}]")
+            with st.container(horizontal=True):
+                for found in risk.triggers:
+                    st.badge(f"EDD trigger {found.trigger.id}", icon=":material/priority_high:", color="red")
+                if risk.flagged:
+                    st.badge(f"{len(risk.flagged)} factor(s) need evidence", icon=":material/help:", color="gray")
+                if industry != suggestion.industry:
+                    st.badge("Based on the suggested industry", icon=":material/info:", color="blue")
+            final = st.segmented_control(
+                "Override Rating", RATINGS, required=True, key=f"final_{pack_key}",
+                default=decision.rating if decision else risk.overall,
+                help="Keep Clario's suggestion or override it. An override needs a sign-off (below).")
+            with st.expander("Why this rating?"):
+                st.markdown(f"**{risk.why}.** Rules: any EDD trigger makes it High; otherwise the highest factor "
+                            "wins; a factor without enough evidence counts as Medium.")
+                if industry != suggestion.industry:
+                    st.info(f"This rating was based on the suggested industry ({suggestion.industry_label}). You "
+                            f"chose {INDUSTRIES[industry]}: review the rating and override it if needed.",
+                            icon=":material/info:")
+                for found in risk.triggers:
+                    st.warning(f"**EDD trigger {found.trigger.id}: {found.trigger.text}** ({found.trigger.kind})  \n"
+                               f"{found.reasons}" + "".join(f"  \n> {quote}" for quote in found.evidence),
+                               icon=":material/priority_high:")
+                for rated in risk.factors:
+                    st.markdown(f"**{rated.factor.name}** :{RATING_COLOURS[rated.rating]}-badge[{rated.rating}]  \n"
+                                f"{rated.reasons}")
+                    if rated.evidence:
+                        st.caption("\n".join(f"- {quote}" for quote in rated.evidence))
+                st.caption("Replayed, $0.00" if risk.replayed else f"About ${risk.cost_usd:.3f}")
+
+        # The checklist follows the industry and the risk rating; it cannot be changed on its own
+        checklist, written_for_industry = checklist_for(industry, final)
+        with checklist_slot:
+            st.caption("Set by the industry and risk rating")
+            st.markdown(f"#### {CHECKLISTS[checklist][0]}")
+            if not written_for_industry:
+                st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
+            with st.expander("Why this checklist?"):
+                st.markdown(f"Set from the industry (**{INDUSTRIES[industry]}**) and the risk rating (**{final}**).  \n"
+                            f"{LEVEL_MEANING[final]}")
+                st.caption(f"{checklist_size(checklist)} checks.")
+                if not written_for_industry:
+                    st.caption("There is no checklist written for this industry yet, so the fintech one is used.")
+
+        # --- Sign-off: only when the analyst overrides Clario's suggested rating ---
+        reason, reviewer, evidence_link, evidence = "", "", "", None
+        if final != risk.overall:
+            overridden_before = decision and decision.overridden
+            with st.container(border=True):
+                st.markdown("**:material/gavel: AML senior officer sign-off for the override**")
+                st.caption(f":material/edit: You are overriding Clario's suggested rating ({risk.overall}) with {final}. "
+                           "An AML senior officer must sign this off, with evidence of the sign-off.")
+                reason = st.text_area("Reason", value=decision.reason if overridden_before else "",
+                                      key=f"reason_{pack_key}", height=80)
+                reviewer = st.text_input("AML senior officer", key=f"reviewer_{pack_key}",
+                                         value=decision.reviewer if overridden_before else "",
+                                         help="Name of the AML senior officer who signed off the override.")
+                st.markdown("**Evidence of the sign-off** (a document, a link, or both)")
+                with st.container(horizontal=True):
+                    upload = st.file_uploader("Sign-off document", key=f"evidence_{pack_key}",
+                                              type=["pdf", "png", "jpg", "jpeg", "docx", "msg", "eml"],
+                                              help="For example the signed form, or the approval email saved as a PDF.")
+                    evidence_link = st.text_input(
+                        "Or a link to the folder where the evidence is saved", key=f"evidence_link_{pack_key}",
+                        value=decision.evidence_link if overridden_before else "",
+                        placeholder="e.g. https://yourfirm.sharepoint.com/sites/kyc/EXAMPLE-PAYMENTS")
+                if upload:
+                    evidence = (upload.name, upload.getvalue())
+                elif overridden_before and decision.evidence_document and evidence_path(decision_path).exists():
+                    with st.container(horizontal=True, vertical_alignment="center"):
+                        st.caption(f":material/attach_file: On file: {decision.evidence_document}. Upload a new "
+                                   "document to replace it.")
+                        st.download_button("Download", evidence_path(decision_path).read_bytes(),
+                                           file_name=decision.evidence_document, icon=":material/download:",
+                                           key=f"evidence_download_{pack_key}")
+
+        with st.container(horizontal=True):
+            if st.button("Back", icon=":material/arrow_back:", key="back_assess"):
+                go("documents")
+            if st.button("Next", type="primary", icon=":material/arrow_forward:", key="next_assess"):
+                try:
+                    saved_decision = save_risk_decision(decision_path, final, risk.overall, reason, reviewer,
+                                                        evidence_link=evidence_link, evidence=evidence)
                 except ValueError as error:
                     st.error(str(error), icon=":material/error:")
                 else:
-                    log_event(audit_path, approver, "Approved the review"
-                              + (f": {approval_note.strip()}" if approval_note.strip() else ""))
+                    before = (decision.rating, decision.reason, decision.reviewer, decision.evidence_link,
+                              decision.evidence_document) if decision else None
+                    after = (saved_decision.rating, saved_decision.reason, saved_decision.reviewer,
+                             saved_decision.evidence_link, saved_decision.evidence_document)
+                    if before != after:
+                        if saved_decision.overridden:
+                            evidence_given = " and ".join(e for e in (saved_decision.evidence_document,
+                                                                      saved_decision.evidence_link) if e)
+                            log_event(audit_path, saved_decision.reviewer,
+                                      f"Overrode the risk rating {risk.overall} → {final}, signed off as AML senior "
+                                      f"officer: {saved_decision.reason} (evidence: {evidence_given})")
+                        else:
+                            log_event(audit_path, st.session_state.get("last_reviewer", ""),
+                                      f"Confirmed Clario's risk rating {final}")
+                    if st.session_state.get("choice", (None, None)) != (industry, checklist):
+                        log_event(audit_path, st.session_state.get("last_reviewer", ""),
+                                  f"Industry {INDUSTRIES[industry]}"
+                                  + (f" (Clario suggested {suggestion.industry_label})" if industry != suggestion.industry
+                                     else "") + f"; checklist {CHECKLISTS[checklist][0]}")
+                    remember(choice=(industry, checklist))
+                    go("results")
+        if source == "Upload documents":
+            st.caption(f"Next saves your choices and runs the KYC checks: Claude reads every document again against the "
+                       f"checklist (roughly 3p per document, about ${len(documents) * 0.027:.2f} for these "
+                       f"{len(documents)}). A reopened review with unchanged documents and checklist costs nothing.")
+        elif checklist != SAMPLE_CHECKLIST:
+            st.caption(f":material/payments: The sample's saved answer is for the {CHECKLISTS[SAMPLE_CHECKLIST][0]} "
+                       "checklist. With this checklist, Next asks Claude to run the checks again (about 20p).")
+        st.stop()
+
+decision = load_risk_decision(decision_path)
+if "industry" not in st.session_state or not st.session_state.get("choice", (None, None))[1] or decision is None:
+    needs_first(screen, "assess")
+suggestion = st.session_state.industry[1]
+industry, checklist = st.session_state.choice
+
+with open_tab:  # Evidence review, or Ongoing monitoring: both work from the checked results
+    # Results no longer match if the labels or the checklist changed
+    if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
+        st.session_state.pop("assessment")
+
+    # --- Screen 5: results. The checks run as this screen opens, then the results appear ---
+
+    if "assessment" not in st.session_state:
+        replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
+        sources, _ = fetch_links(company_link, website, fca_frn)
+        with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the "
+                        f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
+            try:
+                st.session_state.assessment = ((confirmed, checklist), assess_pack(
+                    documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
+                    saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None,
+                ))
+                checked = st.session_state.assessment[1]
+                log_event(audit_path, "Clario", f"Checked {len(documents)} documents against the "
+                          f"{CHECKLISTS[checklist][0]} checklist" + (" (saved answer replayed, no cost)" if checked.replayed else f" (about ${checked.cost_usd:.3f})"))
+            except ExtractionFailed as error:
+                st.error(f"Could not run the checks: {error}", icon=":material/error:")
+                st.button("Try again", icon=":material/refresh:")
+                navigation()
+                st.stop()
+    original = st.session_state.assessment[1]
+
+    # The analyst's saved changes for this set of documents and checklist
+    review_path = case_file(cycle_review_key, checklist)
+    overrides = load_overrides(review_path)
+    # The legal entity name rule on check 1.1, then the analyst's changes, which always have the final say
+    named = apply_entity_name(original, entity_name, parse_company_number(company_link), lookup=cached_company)
+    result = apply_overrides(named, overrides)
+
+    approval_path = case_file(cycle_review_key, "final-approval")
+    approval = load_approval(approval_path)
+
+    # Step 4 reviews sections 1 to 6. Section 7 (risk rating and escalation) is covered by step 3, the final approval
+    # and the audit log, so it is not shown. Section 8 (ongoing monitoring) comes after the final approval.
+    RISK_SECTION, ONGOING_SECTION = "7.", "8."
+    review_outcomes = [o for o in result.outcomes if not o.check.section.startswith((RISK_SECTION, ONGOING_SECTION))]
+    ongoing_outcomes = [o for o in result.outcomes if o.check.section.startswith(ONGOING_SECTION)]
+    review_ids = {o.check.id for o in review_outcomes}
+    submission = load_submission(review_key, cycle)
+
+    def document_list() -> list[dict]:
+        return ([{"name": d.name, "description": d.description, "supports": "Original document"}
+                 for d in original_documents]
+                + [{"name": r["name"], "description": r.get("description", ""), "supports": f"Check {r['check_id']}"}
+                   for _, r in stored_supporting])
+
+    def freeze_now(given: "FinalApproval"):
+        """Freeze the checklist as it stands, at approval."""
+        return freeze(review_key, cycle, result, given.approver, given.approved_on, given.note, industry, checklist,
+                      asdict(decision), document_list())
+
+    snapshot = load_snapshot(review_key, cycle) if approval else None
+    if approval and not snapshot:  # approved before checklists were frozen: freeze it as it stands now
+        snapshot = freeze_now(approval)
+    history = approved_snapshots(review_key)  # every approved cycle, most recent first
+
+    def show_frozen(frozen, key: str) -> None:
+        """A checklist exactly as it was approved: read-only."""
+        lines_shown = [line for line in frozen.lines if not line.section.startswith((RISK_SECTION, ONGOING_SECTION))]
+        for section, section_lines in groupby(lines_shown, key=lambda line: line.section):
+            section_lines = list(section_lines)
+            present = sum(line.status == Status.PRESENT.value for line in section_lines)
+            with st.expander(f"{section} · {present} of {len(section_lines)} present"):
+                st.dataframe(pd.DataFrame([{
+                    "Line": line.id, "Check": line.check, "Status": STATUS_TEXT[Status(line.status)],
+                    "Validated by": line.validated_by, "Comment": line.comment, "Finding": line.finding,
+                } for line in section_lines]), hide_index=True, key=f"frozen_{key}_{section}",
+                    column_config={"Check": st.column_config.TextColumn(width="large"),
+                                   "Finding": st.column_config.TextColumn(width="large")})
+        if frozen.documents:
+            st.caption(":material/folder_open: Documents at approval: "
+                       + ", ".join(d["name"] for d in frozen.documents))
+
+    def withdraw(who: str) -> None:
+        withdraw_approval(approval_path)
+        remove_snapshot(review_key, cycle)
+        log_event(audit_path, who, f"Withdrew the approval given by {approval.approver} on {approval.approved_on}; "
+                  "the checklist can be changed again")
+
+    if screen == "results" and snapshot:  # approved: the checklist is frozen
+        st.header("Results")
+        with st.container(border=True, horizontal=True, vertical_alignment="center"):
+            with st.container():
+                st.caption("Checklist")
+                st.markdown(f"#### {CHECKLISTS[checklist][0]}")
+                st.caption(f"{cycle_name(cycle)} · Industry: {INDUSTRIES[industry]}")
+            with st.container():
+                st.caption("Final approval")
+                st.markdown("#### :green[Approved]")
+                st.caption(f"By {approval.approver} on {approval.approved_on}")
+        st.info(f"**Frozen at approval.** This is the checklist exactly as it stood when {snapshot.approved_by} "
+                f"approved it on {snapshot.approved_on}, and it can no longer be changed. The next review starts from "
+                "it: open **Ongoing monitoring** to start a periodic review.", icon=":material/lock:")
+        st.subheader("Every check, by section")
+        show_frozen(snapshot, "current")
+        with st.container(border=True):
+            st.subheader(":material/verified: Final approval")
+            st.success(f"**Approved by {approval.approver}** on {approval.approved_on}"
+                       + (f": {approval.note}" if approval.note else "."), icon=":material/verified:")
+            who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="withdraw_who",
+                                width=300)
+            st.button("Withdraw approval", icon=":material/undo:", on_click=withdraw, args=(who,),
+                      disabled=not who.strip(), help="Unfreezes the checklist so it can be changed and approved again.")
+        navigation("Ongoing monitoring")
+        st.stop()
+
+    if screen == "results":
+        st.header("Results")
+        with st.container(border=True, horizontal=True, vertical_alignment="center"):
+            with st.container():
+                st.caption("Checklist")
+                st.markdown(f"#### {CHECKLISTS[checklist][0]}")
+                st.caption(f"{len(result.outcomes)} checks · Industry: {INDUSTRIES[industry]}")
+                if decision.overridden:
+                    st.caption(f"Risk rating overridden from {decision.suggested}; signed off by {decision.reviewer}, AML "
+                               "senior officer")
+                if cycle > 1:
+                    st.caption(cycle_name(cycle))
+            with st.container():
+                st.caption("Final approval")
+                if approval:
+                    st.markdown(f"#### :green[Approved]")
+                    st.caption(f"By {approval.approver} on {approval.approved_on}")
+                else:
+                    st.markdown("#### :orange[Submitted]" if submission else "#### :orange[Awaiting]")
+                    st.caption(f"Submitted by {submission['by']} on {submission['on']}" if submission
+                               else "Submit for approval at the end of this page")
+        if cycle > 1 and history:
+            with st.container(border=True):
+                st.markdown(f"**:material/autorenew: {cycle_name(cycle)}** started from the checklist approved on "
+                            f"{history[0].approved_on} by {history[0].approved_by}. Each line keeps its approved status "
+                            "and comment; validate every line again, then submit for approval.")
+        total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
+        st.caption("Checks: replayed, $0.00" if original.replayed
+                   else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
+        with st.container(horizontal=True):
+            for status, help_text in [
+                (Status.PRESENT, "The evidence is there and consistent"),
+                (Status.MISSING, "Not provided"),
+                (Status.UNCLEAR, "Incomplete, out of date or inconsistent"),
+                (Status.NEEDS_HUMAN_REVIEW, "A judgement call for an analyst"),
+                (Status.NOT_STARTED, "Screening and analyst decisions, done outside this tool"),
+            ]:
+                st.metric(STATUS_TEXT[status], sum(o.status is status for o in review_outcomes), help=help_text,
+                          border=True)
+
+        left, right = st.columns(2)
+        for column, title, icon, gaps, empty in [
+            (left, "Request from client", ":material/mail:", result.request_from_client(), "Nothing to request."),
+            (right, "Check on public registers", ":material/account_balance:", result.check_on_registers(), "Nothing to check."),
+        ]:
+            with column.container(border=True):
+                st.subheader(f"{icon} {title}")
+                if not gaps:
+                    st.success(empty, icon=":material/check_circle:")
+                for outcome in gaps:
+                    st.markdown(f"**{outcome.check.id} · {outcome.check.evidence_source}**  \n{outcome.finding}")
+
+        # --- Every check, validated line by line ---
+
+        st.subheader("Every check, by section")
+        st.caption(
+            "For each line: tick **Validated** once you have checked it, change the **Status** if you disagree (a "
+            "**comment** is then required), and open **Details** for the finding, Claude's view, who decided and the "
+            "evidence, or to upload supporting documents. Then click **Save review**. :material/lock: Saved on this computer "
+            "only."
+        )
+        validated_count = sum(bool(o.validated_by) for o in review_outcomes)
+        st.progress(validated_count / len(review_outcomes),
+                    text=f"{validated_count} of {len(review_outcomes)} lines validated")
+
+    supporting_by_check, supporting_documents = {}, {}
+    if st.session_state.get("case_id"):
+        for document, record in load_supporting(st.session_state.case_id):
+            supporting_by_check.setdefault(record["check_id"], []).append(record)
+            supporting_documents[document.fingerprint] = (document, record)
+    in_this_run = {d.fingerprint for d in documents}
+    section_reads = st.session_state.setdefault("section_reads", {})  # section -> documents its re-run has read
+    not_yet_read = [r for _, r in supporting_documents.values() if r["sha256"] not in in_this_run]
+    if not_yet_read and screen == "results":
+        with st.container(border=True):
+            st.info(f"{len(not_yet_read)} supporting document(s) added since the checks ran: "
+                    + ", ".join(r["name"] for r in not_yet_read) + ". Re-run the section they belong to (button in each "
+                    "section), or re-run all the checks, so Claude reads them with the rest of the documents.",
+                    icon=":material/attach_file:")
+            if st.button("Re-run all the checks with the new documents", icon=":material/refresh:"):
+                st.session_state.entity = {**saved, "supporting": [d for d, _ in supporting_documents.values()]}
+                go("documents")
+            st.caption(f"Re-running everything reads every document again, with the industry and risk rating (about "
+                       f"${(len(documents) + len(not_yet_read)) * 0.027 + 0.15:.2f}). Your line reviews are kept.")
+
+
+    def rerun_section(section: str, check_ids: set[str], unread: list[tuple[UploadedDocument, dict]]) -> None:
+        """Re-check one section with every document, including supporting ones Claude has not read yet."""
+        extra_docs = [document for document, _ in unread]
+        extra_labels = [DocumentLabel(document.name, "other", f"Supporting document added for check {record['check_id']}")
+                        for document, record in unread]
+        sources, _ = fetch_links(company_link, website, fca_frn)
+        with st.spinner(f"Claude is re-checking {section} with {len(documents) + len(extra_docs)} documents..."):
+            partial = assess_pack(documents + extra_docs, confirmed + extra_labels, sources,
+                                  checklist=CHECKLISTS[checklist][1], only=check_ids)
+        new_lines = {o.check.id: o for o in partial.outcomes}
+        key, current = st.session_state.assessment
+        st.session_state.assessment = (key, replace(
+            current, outcomes=[new_lines.get(o.check.id, o) for o in current.outcomes], replayed=False,
+            input_tokens=current.input_tokens + partial.input_tokens,
+            output_tokens=current.output_tokens + partial.output_tokens))
+        section_reads[section] = section_reads.get(section, set()) | {d.fingerprint for d in extra_docs}
+        log_event(audit_path, st.session_state.get("last_reviewer", ""),
+                  "Re-ran the section with " + ", ".join(d.name for d in extra_docs), section)
+
+
+    reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""), width=300,
+                             help="Your name, recorded against every line you validate or change.")
+    line_versions = st.session_state.setdefault("line_versions", {})  # a line's fields start fresh after it is saved
+
+
+    def is_changed(line) -> bool:
+        o, status, validated, comment, uploads, _ = line
+        return (status, validated, comment) != (o.status, bool(o.validated_by), o.reviewer_note) or bool(uploads)
+
+
+    def save_lines(selected: list) -> list[str]:
+        """Save these lines: status, tick and comment, then add any uploaded documents, which Claude reads against
+        their line and can set to Present. Returns problems; nothing is saved if there are any."""
+        touched = [(o.check.id, status, comment, validated) for o, status, validated, comment, _, _ in selected
+                   if (status, validated, comment) != (o.status, bool(o.validated_by), o.reviewer_note)]
+        uploads_for = [(o, comment, validated, upload, description)
+                       for o, _, validated, comment, uploads, description in selected for upload in uploads]
+        problems = save_line_reviews(review_path, named, touched, reviewer)
+        if uploads_for and not st.session_state.get("case_id"):
+            problems.append("Save the review (Next on the first screen) before adding supporting documents")
+        if problems:
+            return problems
+        shown = {o.check.id: o for o, *_ in selected}
+        for check_id, status, comment, validated in touched:
+            o = shown[check_id]
+            log_event(audit_path, reviewer, describe_line_change(o.status.value, status.value, bool(o.validated_by),
+                                                                  validated, o.reviewer_note, comment), check_id)
+        changed_by_you = {check_id for check_id, status, _, _ in touched if status is not shown[check_id].status}
+        for o, comment, validated, upload, description in uploads_for:
+            document = UploadedDocument(upload.name, upload.getvalue(), upload.type or "application/pdf")
+            verdict = None
+            if o.status is not Status.PRESENT:  # Claude reads it against this one line
+                with st.spinner(f"Claude is reading {document.name} against check {o.check.id}..."):
+                    try:
+                        verdict = read_supporting_document(o.check, o.finding, document, description)
+                    except (ExtractionFailed, UnsupportedFile) as error:
+                        st.warning(f"{document.name} was added, but Claude could not read it ({error}).",
+                                   icon=":material/warning:")
+            add_supporting_document(st.session_state.case_id, document, o.check.id, reviewer,
+                                    verdict=verdict.label if verdict else "",
+                                    verdict_finding=verdict.finding if verdict else "", description=description)
+            log_event(audit_path, reviewer, f"Added supporting document {document.name}"
+                      + (f' ("{description.strip()}")' if description.strip() else ""), o.check.id)
+            if verdict and verdict.satisfies == "yes" and o.check.id not in changed_by_you:
+                explanation = verdict.finding + "".join(f" {quote}" for quote in verdict.evidence[:1])
+                note = (f"{comment.strip()} (Claude, from {document.name}: {explanation})" if comment.strip()
+                        else f"Claude, from {document.name}: {explanation}")
+                save_override(review_path, named, o.check.id, Status.PRESENT, note, reviewer or "Clario",
+                              validated=validated, via=document.name)
+            if verdict:
+                log_event(audit_path, "Claude", f"Read {document.name}: {verdict.label}"
+                          + (f" → status {o.status.value} → Present" if verdict.satisfies == "yes"
+                             and o.check.id not in changed_by_you else ""), o.check.id)
+        if reviewer.strip():
+            st.session_state.last_reviewer = reviewer.strip()
+        if submission and any(o.check.id in review_ids for o, *_ in selected):
+            withdraw_submission(review_key, cycle)
+            log_event(audit_path, reviewer, "Withdrew the submission for approval because the checklist changed; "
+                      "submit it again when it is ready")
+        for o, *_ in selected:
+            line_versions[o.check.id] = line_versions.get(o.check.id, 0) + 1
+        return []
+
+
+    lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
+
+
+    def render_line(o) -> None:
+        """One checklist line: status, tick, comment and Save, with Details and a supporting document."""
+        key = f"{review_path.stem}_{o.check.id}_{line_versions.get(o.check.id, 0)}"
+        with st.container(border=True):
+            text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
+            text_side.markdown(f"**{o.check.id}** {o.check.check}")
+            status = STATUS_FROM_TEXT[status_side.selectbox(
+                "Status", list(STATUS_TEXT.values()), index=list(STATUS_TEXT).index(o.status),
+                key=f"status_{key}", label_visibility="collapsed")]
+            validated = tick_side.checkbox("Validated", value=bool(o.validated_by), key=f"validated_{key}")
+            comment_side, line_save_side = st.columns([6, 1], vertical_alignment="center")
+            comment = comment_side.text_input(
+                "Comment", value=o.reviewer_note, key=f"comment_{key}", label_visibility="collapsed",
+                placeholder="Comment (required if you change the status)")
+            with st.expander("Details"):
+                st.markdown(f"**Finding:** {o.finding}")
+                if o.claude_finding:
+                    st.markdown(f"**Claude's view:** {o.claude_finding}")
+                st.markdown(f"**Decided by:** {o.decided_by}"
+                            + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
+                if o.before_review:
+                    st.markdown(f"**Before the change:** {o.before_review}")
+                st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
+                                                if o.evidence else " none quoted"))
+                for record in supporting_by_check.get(o.check.id, []):
+                    st.caption(f":material/attach_file: Supporting document: {record['name']}"
+                               + (f" ({record['description']})" if record.get("description") else "")
+                               + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
+                               + f" on {record['added_on']}"
+                               + (f". Claude: {record['verdict']}. {record.get('verdict_finding', '')}"
+                                  if record.get("verdict") else ""))
+            # Add a supporting document: upload, describe it and save, in a fold-out section
+            with st.expander("Upload supporting document", icon=":material/attach_file:"):
+                uploads = st.file_uploader(
+                    "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
+                    help="Added to the review's document store when you save this line.")
+                description = st.text_input(
+                    "What does this document show? (optional)", key=f"description_{key}",
+                    placeholder="e.g. Updated register of members, dated 20 Oct 2026",
+                    help="Claude reads this with the document to understand what it is for.")
+                if uploads and o.status is not Status.PRESENT:
+                    st.caption(":material/smart_toy: When you save, Claude reads the document against this "
+                               "check (roughly 1-3p) and sets the line to Present if it provides the evidence.")
+                upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
+                                        disabled=not uploads, help="Add the document and save this line.")
+            line = (o, status, validated, comment or "", uploads or [], description or "")
+            lines.append(line)
+            line_save = line_save_side.button("Save", icon=":material/save:", key=f"save_{key}",
+                                              disabled=not is_changed(line), help="Save this line now.",
+                                              width="stretch")
+            if line_save or upload_save:
+                problems = save_lines([line])
+                if problems:
+                    st.error("Not saved:\n" + "\n".join(f"- {problem}" for problem in problems),
+                             icon=":material/error:")
+                else:
                     st.rerun()
 
-# --- After approval: ongoing monitoring (section 8) ---
 
-with st.container(border=True):
-    st.subheader(":material/event_repeat: After approval: ongoing monitoring")
-    if not approval:
-        st.caption("Opens once the review is approved: setting the next review date, the triggers for an early "
-                   "review, and record keeping (checklist section 8).")
-    else:
-        approved_on = date.fromisoformat(approval.approved_on)
-        years = REVIEW_YEARS[decision.rating]
-        try:
-            next_review = approved_on.replace(year=approved_on.year + years)
-        except ValueError:  # 29 February
-            next_review = approved_on.replace(year=approved_on.year + years, day=28)
-        st.info(f"**Next review due: {next_review:%d %b %Y}**: {years} year{'s' if years > 1 else ''} after approval, "
-                f"for a {decision.rating} risk client (risk methodology).", icon=":material/event:")
-        for o in ongoing_outcomes:
-            render_line(o)
 
-# --- Audit log ---
+    if screen == "monitoring":
+        st.header("Ongoing monitoring")
+        if not history:
+            st.info("Opens once the review is approved: the next review date, the ongoing monitoring "
+                    "checks (checklist section 8), periodic reviews and the review history.", icon=":material/info:")
+            if st.button("Go to Evidence review", icon=":material/arrow_back:"):
+                go("results")
+            st.stop()
+        last = history[0]
+        rating = last.risk.get("rating", "")
+        due = next_review_date(last.approved_on, rating)
+        with st.container(horizontal=True):
+            st.metric("Next review due", f"{due:%d %b %Y}", border=True,
+                      help=f"{REVIEW_YEARS.get(rating, 1)} year(s) after approval for a {rating} risk client "
+                           "(risk methodology)")
+            st.metric("Risk rating", rating or "Not rated", border=True)
+            st.metric("Last approved", f"{date.fromisoformat(last.approved_on):%d %b %Y}", border=True,
+                      help=f"{cycle_name(last.cycle)}, approved by {last.approved_by}")
 
-events = load_events(audit_path)
-with st.expander(f"Audit log ({len(events)} entries)", icon=":material/history:"):
-    if events:
-        st.dataframe(pd.DataFrame([{"Time": e.at, "Who": e.who, "Line": e.line, "What": e.what} for e in events]),
-                     hide_index=True, column_config={"What": st.column_config.TextColumn(width="large")})
-        st.download_button("Download the audit log (CSV)", events_csv(events), file_name="clario-audit-log.csv",
-                           mime="text/csv", icon=":material/download:")
-    else:
-        st.caption("Nothing recorded yet.")
-    st.caption("Every change is recorded here with who made it and when. Entries are only ever added.")
+        with st.container(border=True):
+            st.subheader(":material/autorenew: Periodic review")
+            if approval:
+                st.caption(f"Starts the next review from the checklist approved on {last.approved_on}. Every line "
+                           "keeps its approved status and comment with **Validated** cleared, so you check each one "
+                           "again and add any new documents, then submit it for approval. Nothing is "
+                           "sent to Claude, so it costs nothing; re-run a section only if you want Claude to read new "
+                           "documents.")
+                who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="periodic_who",
+                                    width=300)
+                if st.button("Start periodic review", type="primary", icon=":material/play_arrow:",
+                             disabled=not who.strip()):
+                    new_cycle = start_periodic_review(review_key)
+                    new_key = cycle_key(review_key, new_cycle)
+                    copy_file(decision_path, case_file(new_key, "risk-decision"))
+                    carry_forward(snapshot, named, case_file(new_key, checklist), who)
+                    log_event(audit_path, who, f"Started {cycle_name(new_cycle).lower()} from the checklist approved "
+                              f"on {last.approved_on}; every line to be validated again")
+                    st.session_state.last_reviewer = who.strip()
+                    go("results")
+            else:
+                st.info(f"**{cycle_name(cycle)}** is in progress. Validate every line in **Evidence review**, then "
+                        "submit it for approval.", icon=":material/pending_actions:")
+                if st.button("Go to Evidence review", icon=":material/arrow_forward:"):
+                    go("results")
 
-navigation()
-st.caption(
-    "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "
-    "Not legal advice."
-)
+        with st.container(border=True):
+            st.subheader(":material/event_repeat: Ongoing monitoring checks (section 8)")
+            st.caption("Record keeping, the triggers for an early review, and screening between reviews.")
+            for o in ongoing_outcomes:
+                render_line(o)
+
+        with st.container(border=True):
+            st.subheader(":material/history: Review history")
+            st.caption("Each approved review, frozen as it stood at approval.")
+            for past in history:
+                with st.expander(f"{cycle_name(past.cycle)} · approved on {past.approved_on} by {past.approved_by} · "
+                                 f"{past.risk.get('rating', '')} risk"):
+                    if past.note:
+                        st.caption(f"Approval note: {past.note}")
+                    show_frozen(past, f"history_{past.cycle}")
+        navigation()
+        st.stop()
+
+    for section, outcomes in groupby(review_outcomes, key=lambda o: o.check.section):
+        outcomes = list(outcomes)
+        present = sum(o.status is Status.PRESENT for o in outcomes)
+        open_issues = sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in outcomes)
+        done = sum(bool(o.validated_by) for o in outcomes)
+        label = (f"{section} · {present} of {len(outcomes)} present · {done} of {len(outcomes)} validated"
+                 + (f" · {open_issues} to look at" if open_issues else ""))
+        section_ids = {o.check.id for o in outcomes}
+        unread = [(document, record) for document, record in supporting_documents.values()
+                  if record["check_id"] in section_ids and document.fingerprint not in in_this_run
+                  and document.fingerprint not in section_reads.get(section, set())]
+        with st.expander(label, expanded=open_issues > 0 or bool(unread)):
+            if unread:
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    st.caption(f":material/attach_file: New in this section: {', '.join(d.name for d, _ in unread)}. "
+                               f"Re-run it so Claude reads them with the other documents (roughly 10-15p).",
+                               width="stretch")
+                    if st.button("Re-run this section", icon=":material/refresh:", key=f"rerun_{section}"):
+                        try:
+                            rerun_section(section, section_ids, unread)
+                        except ExtractionFailed as error:
+                            st.error(f"Could not re-run the section: {error}", icon=":material/error:")
+                        else:
+                            st.rerun()
+            for o in outcomes:
+                render_line(o)
+
+    changed = [line for line in lines if is_changed(line)]
+    with st.container(horizontal=True, vertical_alignment="center"):
+        if st.button("Save review", type="primary", icon=":material/save:", disabled=not changed,
+                     help="Save every changed line at once."):
+            problems = save_lines(changed)
+            if problems:
+                st.error("Nothing was saved yet:\n" + "\n".join(f"- {problem}" for problem in problems),
+                         icon=":material/error:")
+            else:
+                st.rerun()
+        st.caption(f"{len(changed)} line(s) with unsaved changes." if changed else "No unsaved changes.")
+
+    def undo_line(check_id: str) -> None:
+        remove_override(review_path, check_id)
+        log_event(audit_path, reviewer, "Undid the review of this line", check_id)
+
+
+    if overrides:
+        with st.expander(f"Saved reviews of lines ({len(overrides)})"):
+            for change in overrides.values():
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    what = (f"{change.original_status.value} → **{change.status.value}**"
+                            if change.status is not change.original_status else "validated")
+                    st.markdown(f"**{change.check_id}** · {what} by {change.reviewer} on {change.reviewed_on}"
+                                + (f": {change.note}" if change.note else ""), width="stretch")
+                    st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
+                              on_click=undo_line, args=(change.check_id,))
+
+    # --- Add a document: e.g. a current proof of address at a periodic review ---
+
+    with st.expander("Add a document", icon=":material/note_add:"):
+        st.caption("Add a new or replacement document to the review's document store, and say which check it "
+                   "supports. To have Claude read it, re-run that section afterwards.")
+        added = st.file_uploader("Document", type=UPLOAD_TYPES, accept_multiple_files=True, key="add_document")
+        supports = st.selectbox("Which check does it support?", review_outcomes,
+                                format_func=lambda o: f"{o.check.id} {o.check.check}", key="add_document_check")
+        added_description = st.text_input("What does this document show? (optional)", key="add_document_description",
+                                          placeholder="e.g. Utility bill for the registered office, dated 20 Oct 2026")
+        if st.button("Add document", icon=":material/save:", disabled=not added):
+            problems = save_lines([(supports, supports.status, bool(supports.validated_by), supports.reviewer_note,
+                                    added, added_description)])
+            if problems:
+                st.error("Not added:\n" + "\n".join(f"- {problem}" for problem in problems), icon=":material/error:")
+            else:
+                for key in ("add_document", "add_document_description"):
+                    st.session_state.pop(key, None)
+                st.rerun()
+
+    # --- Submit for approval, then final approval by senior management, needed for every review ---
+
+    outstanding = outstanding_lines(replace(result, outcomes=review_outcomes))
+    with st.container(border=True):
+        st.subheader(":material/send: Submit for approval")
+        if submission:
+            st.success(f"**Submitted for approval** by {submission['by']} on {submission['on']}. Changing a line "
+                       "withdraws the submission.", icon=":material/send:")
+        else:
+            if outstanding:
+                st.warning(f"**Not ready to submit:** every line must be Present and validated. {len(outstanding)} of "
+                           f"{len(review_outcomes)} lines are outstanding: " + ", ".join(outstanding) + ".",
+                           icon=":material/checklist:")
+            else:
+                st.success("Every line is Present and validated: the review can be submitted for approval.",
+                           icon=":material/task_alt:")
+            if st.button("Submit for approval", type="primary", icon=":material/send:",
+                         disabled=bool(outstanding) or not reviewer.strip(),
+                         help="Recorded under the Reviewer name at the top of the checklist."):
+                try:
+                    submit_for_approval(review_key, cycle, reviewer, outstanding)
+                except ValueError as error:
+                    st.error(str(error), icon=":material/error:")
+                else:
+                    log_event(audit_path, reviewer, f"Submitted the {cycle_name(cycle).lower()} for approval")
+                    st.session_state.last_reviewer = reviewer.strip()
+                    st.rerun()
+            if not reviewer.strip() and not outstanding:
+                st.caption("Give your name in **Reviewer** at the top of the checklist to submit.")
+
+    with st.container(border=True):
+        st.subheader(":material/verified: Final approval")
+        st.caption("Every review needs senior management approval before the client is onboarded. Approving freezes "
+                   "the checklist as it stands.")
+        if not submission:
+            st.caption(":material/info: Approval opens once the review is submitted. You can still reject it.")
+        with st.form("final_approval"):
+            approver = st.text_input("Senior manager")
+            approval_note = st.text_area("Note (required to reject)", height=80,
+                                         placeholder="e.g. Approved subject to source of wealth evidence")
+            with st.container(horizontal=True):
+                approve = st.form_submit_button("Approve review", type="primary", icon=":material/verified:",
+                                                disabled=bool(outstanding) or not submission)
+                reject = st.form_submit_button("Reject review", icon=":material/block:",
+                                               help="Formally reject the assessment; the note is the reason.")
+            if approve:
+                try:
+                    given = approve_review(approval_path, approver, approval_note, outstanding=outstanding)
+                except ValueError as error:
+                    st.error(str(error), icon=":material/error:")
+                else:
+                    freeze_now(given)
+                    log_event(audit_path, approver, f"Approved the {cycle_name(cycle).lower()}; checklist frozen"
+                              + (f": {approval_note.strip()}" if approval_note.strip() else ""))
+                    st.rerun()
+            if reject:
+                try:
+                    set_status(status_path, REJECTED, approval_note, approver)
+                except ValueError as error:
+                    st.error(str(error).replace("Give your name", "Give the senior manager's name"),
+                             icon=":material/error:")
+                else:
+                    withdraw_submission(review_key, cycle)
+                    log_event(audit_path, approver, f"Rejected the review: {approval_note.strip()}")
+                    st.rerun()
+
+    navigation("Ongoing monitoring")
+    st.caption(
+        "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "
+        "Not legal advice."
+    )

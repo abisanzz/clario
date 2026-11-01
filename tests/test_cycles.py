@@ -1,0 +1,107 @@
+from datetime import date
+
+import pytest
+
+import services.reviews as reviews
+from services.cases import new_case_id, save_case, save_progress
+from services.checklist import CHECKLISTS, load_checks
+from services.cycles import (
+    approved_snapshots,
+    carry_forward,
+    copy_file,
+    current_cycle,
+    cycle_key,
+    freeze,
+    load_snapshot,
+    load_submission,
+    remove_snapshot,
+    start_periodic_review,
+    submit_for_approval,
+    withdraw_submission,
+)
+from services.overview import all_assessments
+from services.pack import CheckOutcome, PackAssessment, UploadedDocument
+from services.reviews import apply_overrides, approve_review, case_file, load_overrides, save_line_reviews
+from services.risk import save_risk_decision
+from services.validator import Status
+from services.workflow import UNDER_REVIEW
+
+CHECKS = load_checks(CHECKLISTS["fintech_high"][1])[:4]
+TODAY = date(2026, 11, 1)
+
+
+@pytest.fixture
+def folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(reviews, "REVIEWS_DIR", tmp_path / "reviews")
+    return tmp_path / "cases"
+
+
+def checks_found() -> PackAssessment:
+    """The checks before anyone's changes: the first line is Missing, the rest Present."""
+    return PackAssessment([CheckOutcome(c, Status.MISSING if i == 0 else Status.PRESENT, "found")
+                           for i, c in enumerate(CHECKS)])
+
+
+def test_cycles_start_at_one_and_keep_their_own_files(folders):
+    assert current_cycle("case", folders) == 1 and cycle_key("case", 1) == "case"
+    assert start_periodic_review("case", folders, TODAY) == 2
+    assert current_cycle("case", folders) == 2 and cycle_key("case", 2) == "case-cycle-2"
+
+
+def test_a_review_is_submitted_only_when_every_line_is_complete(folders):
+    with pytest.raises(ValueError, match="Cannot submit: 1 line"):
+        submit_for_approval("case", 1, "A. Analyst", ["3.1 Missing"], folder=folders)
+    with pytest.raises(ValueError, match="name"):
+        submit_for_approval("case", 1, " ", [], folder=folders)
+    assert load_submission("case", 1, folders) is None
+    submit_for_approval("case", 1, "A. Analyst", [], folder=folders, today=TODAY)
+    assert load_submission("case", 1, folders) == {"by": "A. Analyst", "on": "2026-11-01"}
+    withdraw_submission("case", 1, folders)
+    assert load_submission("case", 1, folders) is None
+
+
+def test_the_checklist_is_frozen_at_approval(folders, tmp_path):
+    lines_path = tmp_path / "lines.json"
+    save_line_reviews(lines_path, checks_found(), [(CHECKS[0].id, Status.PRESENT, "Client sent it", True)],
+                      "A. Analyst", TODAY)
+    approved = apply_overrides(checks_found(), load_overrides(lines_path))
+    freeze("case", 1, approved, "C. Head", "2026-11-01", "", "payments", "fintech_high", {"rating": "High"},
+           [{"name": "cert.pdf"}], folders)
+    # Later changes to the line reviews do not change what was approved
+    lines_path.unlink()
+    snapshot = load_snapshot("case", 1, folders)
+    assert (snapshot.approved_by, snapshot.lines[0].status, snapshot.lines[0].comment) == (
+        "C. Head", "Present", "Client sent it")
+    assert snapshot.as_assessment().outcomes[0].validated_by == "A. Analyst, 2026-11-01"
+    assert [s.cycle for s in approved_snapshots("case", folders)] == [1]
+    remove_snapshot("case", 1, folders)
+    assert load_snapshot("case", 1, folders) is None
+
+
+def test_a_periodic_review_starts_from_the_approved_lines_with_ticks_cleared(folders, tmp_path):
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    lines = [(c.id, Status.PRESENT, "Client sent it" if i == 0 else "", True) for i, c in enumerate(CHECKS)]
+    save_line_reviews(first, checks_found(), lines, "A. Analyst", TODAY)
+    snapshot = freeze("case", 1, apply_overrides(checks_found(), load_overrides(first)), "C. Head", "2026-11-01", "",
+                      "payments", "fintech_high", {"rating": "High"}, [], folders)
+    assert carry_forward(snapshot, checks_found(), second, "A. Analyst") == 1  # only line 1 differs from the checks
+    carried = apply_overrides(checks_found(), load_overrides(second))
+    assert all(o.status is Status.PRESENT for o in carried.outcomes)  # as approved
+    assert not any(o.validated_by for o in carried.outcomes)  # every line to be checked again
+    copy_file(tmp_path / "missing.json", tmp_path / "copy.json")  # nothing to copy is fine
+    assert not (tmp_path / "copy.json").exists()
+
+
+def test_the_dashboard_follows_the_periodic_review(folders):
+    case_id = new_case_id()
+    save_case(case_id, {"source": "Upload documents", "entity_name": "EXAMPLE PAYMENTS LTD", "company_link": "",
+                        "website": "", "fca_frn": ""}, [UploadedDocument("cert.pdf", b"%PDF")], folder=folders)
+    save_progress(case_id, "pack", [], ("payments", "fintech_high"), folder=folders)
+    save_risk_decision(case_file(case_id, "risk-decision"), "High", "High", "", "")
+    approval = approve_review(case_file(case_id, "final-approval"), "C. Head", today=TODAY)
+    freeze(case_id, 1, checks_found(), approval.approver, approval.approved_on, "", "payments", "fintech_high",
+           {"rating": "High"}, [], folders)
+    cycle = start_periodic_review(case_id, folders, TODAY)
+    copy_file(case_file(case_id, "risk-decision"), case_file(cycle_key(case_id, cycle), "risk-decision"))
+    summary = all_assessments(folders)[0]
+    assert (summary.cycle, summary.status, summary.next_review) == (2, UNDER_REVIEW, "2027-11-01")

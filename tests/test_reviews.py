@@ -134,3 +134,25 @@ def test_final_approval_is_recorded_and_can_be_withdrawn(tmp_path):
         "B. Head", "2026-10-22", "Approved subject to source of wealth evidence")
     withdraw_approval(path)
     assert load_approval(path) is None
+
+
+def test_approval_needs_every_line_present_and_validated(path):
+    from services.reviews import approve_review, load_approval, outstanding_lines, save_line_reviews
+    assert outstanding_lines(ASSESSMENT) == ["3.1 Missing", "3.2 Unclear", "6.1 Not started"]
+    approval_path = path.with_name("approval.json")
+    with pytest.raises(ValueError, match=r"Cannot approve: 3 line\(s\) are not complete"):
+        approve_review(approval_path, "C. Head", outstanding=outstanding_lines(ASSESSMENT))
+    assert load_approval(approval_path) is None
+    lines = [(c, Status.PRESENT, "Confirmed", True) for c in ("3.1", "3.2", "6.1")]
+    save_line_reviews(path, ASSESSMENT, lines, "A. Analyst", today=TODAY)
+    reviewed = apply_overrides(ASSESSMENT, load_overrides(path))
+    assert outstanding_lines(reviewed) == []
+    approve_review(approval_path, "C. Head", outstanding=outstanding_lines(reviewed))
+    assert load_approval(approval_path).approver == "C. Head"
+
+
+def test_a_present_line_that_is_not_validated_is_outstanding(path):
+    from services.reviews import outstanding_lines, save_line_reviews
+    save_line_reviews(path, ASSESSMENT, [("3.1", Status.PRESENT, "Chart received", False)], "A. Analyst", today=TODAY)
+    reviewed = apply_overrides(ASSESSMENT, load_overrides(path))
+    assert "3.1 not validated" in outstanding_lines(reviewed)

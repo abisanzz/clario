@@ -1,0 +1,39 @@
+# Clario theme: deep navy sidebar, white and light-grey workspace, restrained teal accent.
+
+[theme]
+base = "light"
+primaryColor = "#0F766E"            # teal: buttons, links, active elements (dark enough for white button text)
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F9"
+textColor = "#1B2433"
+borderColor = "#E3E8EF"
+linkColor = "#0F766E"
+linkUnderline = false
+
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
+baseFontSize = 15
+headingFontSizes = ["2.1rem", "1.45rem", "1.15rem", "1rem", "0.9rem", "0.8rem"]
+headingFontWeights = [700, 600, 600, 600, 500, 500]
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = false
+
+dataframeBorderColor = "#E3E8EF"
+dataframeHeaderBackgroundColor = "#F4F6F9"
+
+# Status badge colours: calm, professional tints
+greenColor = "#15803D"
+orangeColor = "#B45309"
+redColor = "#B91C1C"
+blueColor = "#1D4ED8"
+violetColor = "#6D28D9"
+grayColor = "#64748B"
+
+[theme.sidebar]
+backgroundColor = "#0B1F3A"         # deep navy
+secondaryBackgroundColor = "#13294B"
+textColor = "#E6ECF5"
+borderColor = "#1E3A5F"
+primaryColor = "#5EEAD4"            # light teal, readable on navy

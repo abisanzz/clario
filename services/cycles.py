@@ -1,0 +1,172 @@
+"""Review cycles: onboarding is cycle 1, each periodic review is the next cycle.
+
+Each cycle has its own line reviews, risk decision, submission and approval. At approval the whole checklist is
+frozen into a snapshot, so anyone can see exactly what was present at that point. A periodic review starts from the
+last approved checklist with every Validated tick cleared, so the analyst re-checks each line before it is submitted
+for approval again. Files live in the review's folder in the git-ignored cases folder.
+"""
+
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+
+from services.cases import CASES_DIR
+from services.checklist import Check
+from services.pack import CheckOutcome, PackAssessment
+from services.reviews import save_override
+from services.validator import Status
+
+
+def _folder(case_id: str, folder: Path | None) -> Path:
+    return (folder or CASES_DIR) / case_id
+
+
+def current_cycle(case_id: str, folder: Path | None = None) -> int:
+    path = _folder(case_id, folder) / "cycle.json"
+    return json.loads(path.read_text())["cycle"] if path.exists() else 1
+
+
+def cycle_key(case_id: str, cycle: int) -> str:
+    """The key the cycle's review files are saved under. Cycle 1 keeps the review's own id."""
+    return case_id if cycle == 1 else f"{case_id}-cycle-{cycle}"
+
+
+def start_periodic_review(case_id: str, folder: Path | None = None, today: date | None = None) -> int:
+    """Begin the next review cycle. Returns its number."""
+    cycle = current_cycle(case_id, folder) + 1
+    path = _folder(case_id, folder)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "cycle.json").write_text(json.dumps({"cycle": cycle,
+                                                  "started_on": (today or date.today()).isoformat()}, indent=2))
+    return cycle
+
+
+# --- Submission for approval ---
+
+def submission_path(case_id: str, cycle: int, folder: Path | None = None) -> Path:
+    return _folder(case_id, folder) / f"submitted-cycle-{cycle}.json"
+
+
+def submit_for_approval(case_id: str, cycle: int, by: str, outstanding: list[str], folder: Path | None = None,
+                        today: date | None = None) -> None:
+    """The analyst hands the review to the approver. Only when every line is Present and validated."""
+    if outstanding:
+        raise ValueError(f"Cannot submit: {len(outstanding)} line(s) are not complete ({', '.join(outstanding)})")
+    if not by.strip():
+        raise ValueError("Give your name")
+    path = submission_path(case_id, cycle, folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"by": by.strip(), "on": (today or date.today()).isoformat()}, indent=2))
+
+
+def load_submission(case_id: str, cycle: int, folder: Path | None = None) -> dict | None:
+    path = submission_path(case_id, cycle, folder)
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def withdraw_submission(case_id: str, cycle: int, folder: Path | None = None) -> None:
+    submission_path(case_id, cycle, folder).unlink(missing_ok=True)
+
+
+# --- Snapshots frozen at approval ---
+
+@dataclass(frozen=True)
+class FrozenLine:
+    id: str
+    section: str
+    check: str
+    evidence_source: str
+    evidence_type: str
+    status: str
+    finding: str
+    evidence: list[str] = field(default_factory=list)
+    decided_by: str = ""
+    claude_finding: str = ""
+    before_review: str = ""
+    validated_by: str = ""
+    comment: str = ""
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    cycle: int
+    approved_by: str
+    approved_on: str
+    note: str
+    industry: str
+    checklist: str
+    risk: dict  # the risk decision as saved
+    documents: list[dict]  # name, description, kind ("original" or "supporting for 3.6")
+    lines: list[FrozenLine]
+    frozen_at: str = ""
+
+    def as_assessment(self) -> PackAssessment:
+        """The frozen checklist as results, e.g. to show it read-only."""
+        return PackAssessment([CheckOutcome(
+            Check(line.id, line.section, line.check, line.evidence_source, line.evidence_type),
+            Status(line.status), line.finding, list(line.evidence), line.decided_by, line.claude_finding,
+            line.before_review, line.validated_by, line.comment) for line in self.lines])
+
+
+def snapshot_path(case_id: str, cycle: int, folder: Path | None = None) -> Path:
+    return _folder(case_id, folder) / f"approved-cycle-{cycle}.json"
+
+
+def freeze(case_id: str, cycle: int, assessment: PackAssessment, approved_by: str, approved_on: str, note: str,
+           industry: str, checklist: str, risk: dict, documents: list[dict], folder: Path | None = None) -> Snapshot:
+    """Freeze the checklist as it stands at approval."""
+    lines = [FrozenLine(o.check.id, o.check.section, o.check.check, o.check.evidence_source, o.check.evidence_type,
+                        o.status.value, o.finding, list(o.evidence), o.decided_by, o.claude_finding, o.before_review,
+                        o.validated_by, o.reviewer_note) for o in assessment.outcomes]
+    snapshot = Snapshot(cycle, approved_by, approved_on, note, industry, checklist, risk, documents, lines,
+                        datetime.now().isoformat(timespec="seconds"))
+    path = snapshot_path(case_id, cycle, folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(asdict(snapshot), indent=2))
+    return snapshot
+
+
+def load_snapshot(case_id: str, cycle: int, folder: Path | None = None) -> Snapshot | None:
+    path = snapshot_path(case_id, cycle, folder)
+    if not path.exists():
+        return None
+    record = json.loads(path.read_text())
+    record["lines"] = [FrozenLine(**line) for line in record["lines"]]
+    return Snapshot(**record)
+
+
+def remove_snapshot(case_id: str, cycle: int, folder: Path | None = None) -> None:
+    """Used when an approval is withdrawn: the checklist is no longer frozen."""
+    snapshot_path(case_id, cycle, folder).unlink(missing_ok=True)
+
+
+def approved_snapshots(case_id: str, folder: Path | None = None) -> list[Snapshot]:
+    """Every approved cycle, most recent first."""
+    found = [load_snapshot(case_id, cycle, folder) for cycle in range(1, current_cycle(case_id, folder) + 1)]
+    return [s for s in reversed(found) if s]
+
+
+def carry_forward(previous: Snapshot, assessment: PackAssessment, lines_path: Path, reviewer: str,
+                  today: date | None = None) -> int:
+    """The starting point of a periodic review: each line as last approved, saved as the new cycle's line reviews with
+    its Validated tick cleared, so the analyst checks every line again. `assessment` is the checks before anyone's
+    changes. Returns how many lines were carried forward with a status or comment of their own."""
+    approved = {line.id: line for line in previous.lines}
+    carried = 0
+    for o in assessment.outcomes:
+        line = approved.get(o.check.id)
+        if not line or (line.status == o.status.value and not line.comment):
+            continue  # nothing to carry: the line shows as the checks found it
+        note = line.comment or f"As approved on {previous.approved_on}"
+        save_override(lines_path, assessment, o.check.id, Status(line.status), note, reviewer or "Clario", today)
+        carried += 1
+    return carried
+
+
+def copy_file(source: Path, destination: Path) -> None:
+    """Used to start a periodic review with the last cycle's risk decision, which the analyst can then change."""
+    if source.exists():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source.read_text())
+
