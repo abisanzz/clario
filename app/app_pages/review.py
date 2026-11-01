@@ -70,6 +70,7 @@ from services.cases import (  # noqa: E402
     save_review,
 )
 from services.checklist import CHECKLISTS, load_checks  # noqa: E402
+from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
     DOCUMENT_TYPES,
@@ -326,24 +327,55 @@ def details_tab() -> None:
             key=f"entity_name_{source}",
             help="Enter the full registered legal name of the entity you are conducting business with.",
         )
-        company_link = st.text_input(
-            "Companies House Link or Company Number",
-            value=remembered("company_link", SAMPLE_COMPANY_NUMBER, source),
-            key=f"company_link_{source}",
-            placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
-            help="Enter a link to the company’s Companies House record or its company registration number. "
-                 "We’ll use this to find the company’s details on Companies House.",
-        )
-        show_industry(company_link)
-        show_entity_name_check(entity_name, company_link)
+        known_country = remembered("country", UNITED_KINGDOM, source) or UNITED_KINGDOM
+        country = st.selectbox(
+            "Country of incorporation", COUNTRIES if known_country in COUNTRIES else [known_country] + COUNTRIES,
+            index=(COUNTRIES.index(known_country) if known_country in COUNTRIES else 0), key=f"country_{source}",
+            accept_new_options=True,
+            help="Where the entity is registered. Choose from the list or type another country. Companies House and "
+                 "FCA register checks apply to UK companies only.",
+        ) or UNITED_KINGDOM
+        registration_number = ""
+        if is_uk(country):
+            company_link = st.text_input(
+                "Companies House Link or Company Number",
+                value=remembered("company_link", SAMPLE_COMPANY_NUMBER, source),
+                key=f"company_link_{source}",
+                placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
+                help="Enter a link to the company’s Companies House record or its company registration number. "
+                     "We’ll use this to find the company’s details on Companies House.",
+            )
+            show_industry(company_link)
+            show_entity_name_check(entity_name, company_link)
+        else:
+            company_link = ""
+            registration_number = st.text_input(
+                "Company registration number", value=remembered("registration_number", "", source),
+                key=f"registration_{source}", placeholder="e.g. 654321",
+                help=f"The entity's number on the company register in {country}.",
+            )
+            st.caption(f":material/info: Incorporated in {country}: Companies House and the FCA register are not "
+                       "checked. Check the entity on its home country's register.")
         website = st.text_input("Company website", value=remembered("website", "", source), key=f"website_{source}",
                                 placeholder="e.g. example.com")
-        fca_frn = st.text_input(
-            "FCA firm reference number", key=f"fca_{source}", placeholder="e.g. 730427",
-            value=remembered("fca_frn", SAMPLE_FCA_FRN, source),
-            help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA regulated.",
-        )
-        show_fca_firm(fca_frn, company_link)
+        if is_uk(country):
+            fca_frn = st.text_input(
+                "FCA firm reference number", key=f"fca_{source}", placeholder="e.g. 730427",
+                value=remembered("fca_frn", SAMPLE_FCA_FRN, source),
+                help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA "
+                     "regulated.",
+            )
+            show_fca_firm(fca_frn, company_link)
+        else:
+            fca_frn = ""
+        known_industry = remembered("stated_industry", "", source)
+        stated_industry = st.selectbox(
+            "Industry", list(INDUSTRIES), format_func=INDUSTRIES.get,
+            index=list(INDUSTRIES).index(known_industry) if known_industry in INDUSTRIES else None,
+            key=f"stated_industry_{source}", placeholder="Not sure: Clario will suggest one",
+            help="If you know it. Clario still suggests an industry from the documents, and you confirm it at Risk "
+                 "assessment.",
+        ) or ""
         existing = find_case({"entity_name": entity_name, "company_link": company_link})
         if existing and existing["id"] != st.session_state.get("case_id"):
             with st.container(border=True):
@@ -395,7 +427,8 @@ def details_tab() -> None:
                 ":material/lock: Only upload fictitious or approved documents: files are sent to Anthropic to be read.")
 
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
-               "fca_frn": fca_frn}
+               "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
+               "stated_industry": stated_industry}
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:"):
             save_draft(details, documents)
@@ -475,7 +508,9 @@ def navigation(next_label: str | None = None, next_ready: bool = True, save=None
 
 
 st.title(entity_name or "Legal entity")
-summary = [("Company", company_link), ("FCA FRN", fca_frn), ("Website", website),
+country = saved.get("country") or UNITED_KINGDOM
+summary = [("Incorporated in", country), ("Company", company_link),
+           ("Registration number", saved.get("registration_number", "")), ("FCA FRN", fca_frn), ("Website", website),
            ("Documents", f"{len(documents)} files")]
 st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
 if st.session_state.get("case_id"):
@@ -835,7 +870,8 @@ if screen == "assess":
                     st.stop()
         risk = st.session_state.risk[1]
         decision = load_risk_decision(decision_path)
-        chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
+        stated_industry = saved.get("stated_industry", "")
+        chosen_industry = st.session_state.get("choice", (stated_industry or suggestion.industry, None))[0]
         if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
             chosen_industry = suggestion.industry
 
@@ -855,6 +891,9 @@ if screen == "assess":
                 st.markdown(f"#### {suggestion.industry_label}")
                 if suggestion.sources_agree == "no":
                     st.badge("Sources disagree", icon=":material/warning:", color="orange")
+                if stated_industry in INDUSTRIES and stated_industry != suggestion.industry:
+                    st.caption(f":material/info: You entered **{INDUSTRIES[stated_industry]}** on Details & "
+                               "documents. Check which is right.")
                 industry = INDUSTRY_KEY[st.selectbox(
                     "Override Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
                     key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",

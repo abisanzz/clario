@@ -16,7 +16,8 @@ from services.pack import DocumentLabel, UploadedDocument
 from services.validator import normalise_company_name
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
-DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn")
+DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn", "country", "registration_number",
+                 "stated_industry")
 
 
 def new_case_id() -> str:

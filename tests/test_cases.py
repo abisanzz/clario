@@ -1,6 +1,6 @@
 import pytest
 
-from services.cases import answer_paths, list_cases, load_case, new_case_id, save_case
+from services.cases import DETAIL_FIELDS, answer_paths, list_cases, load_case, new_case_id, save_case
 from services.pack import UploadedDocument
 
 DETAILS = {"source": "Upload documents", "entity_name": "EXAMPLE PAYMENTS LTD", "company_link": "99999901",
@@ -14,7 +14,7 @@ def test_a_draft_comes_back_exactly(tmp_path):
     case_id = new_case_id()
     save_case(case_id, DETAILS, [CERT, PHOTO], folder=tmp_path)
     details, documents = load_case(case_id, folder=tmp_path)
-    assert details == {k: DETAILS[k] for k in ("source", "entity_name", "company_link", "website", "fca_frn")}
+    assert details == {k: DETAILS.get(k, "") for k in DETAIL_FIELDS}  # fields not given are saved empty
     assert documents == [CERT, PHOTO]
 
 

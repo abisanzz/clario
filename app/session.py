@@ -6,7 +6,8 @@ from services.cases import load_case, load_progress, load_supporting
 
 ASSESSMENT_PAGE = "app_pages/review.py"
 ASSESSMENTS_PAGE = "app_pages/assessments.py"
-WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "stated_industry_", "source")
+WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "registration_", "stated_industry_",
+                   "source")
 REVIEW_STATE = ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key", "risk",
                 "section_reads", "line_versions", "delete_pending")
 
