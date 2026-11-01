@@ -52,5 +52,5 @@ def test_a_line_changed_from_a_supporting_document_says_so(tmp_path):
                   "A. Analyst", today=date(2026, 10, 31), via="register_update.pdf")
     line = apply_overrides(assessment, load_overrides(path)).outcomes[0]
     assert line.status is Status.PRESENT and not line.validated_by
-    assert line.decided_by == "Claude, from supporting document register_update.pdf, 2026-10-31"
-    assert line.before_review == "Needs human review (Claude): Holdings disagree"
+    assert line.decided_by == "Clario AI, from supporting document register_update.pdf, 2026-10-31"
+    assert line.before_review == "Needs human review (Clario AI): Holdings disagree"

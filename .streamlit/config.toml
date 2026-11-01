@@ -1,39 +1,42 @@
-# Clario theme: deep navy sidebar, white and light-grey workspace, restrained teal accent.
+# Clario theme: one navy workspace, matching the sidebar, with slate cards, near-white text and a teal accent.
 
 [theme]
-base = "light"
-primaryColor = "#0F766E"            # teal: buttons, links, active elements (dark enough for white button text)
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F4F6F9"
-textColor = "#1B2433"
-borderColor = "#E3E8EF"
-linkColor = "#0F766E"
+base = "dark"
+primaryColor = "#139A8C"            # teal: buttons and active elements (white text stays readable)
+backgroundColor = "#223559"         # navy, the same as the sidebar
+secondaryBackgroundColor = "#30466E"  # slate navy: inputs, cards and table headers
+textColor = "#F8FAFC"               # near-white, so text and captions read clearly
+borderColor = "#4A5E85"
+linkColor = "#5EEAD4"
 linkUnderline = false
 
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
-baseFontSize = 15
+baseFontSize = 16
 headingFontSizes = ["2.1rem", "1.45rem", "1.15rem", "1rem", "0.9rem", "0.8rem"]
 headingFontWeights = [700, 600, 600, 600, 500, 500]
 baseRadius = "10px"
 buttonRadius = "8px"
 showWidgetBorder = true
-showSidebarBorder = false
+showSidebarBorder = true            # a thin line between the sidebar and the page
 
-dataframeBorderColor = "#E3E8EF"
-dataframeHeaderBackgroundColor = "#F4F6F9"
+dataframeBorderColor = "#4A5E85"
+dataframeHeaderBackgroundColor = "#2B4068"
 
-# Status badge colours: calm, professional tints
-greenColor = "#15803D"
-orangeColor = "#B45309"
-redColor = "#B91C1C"
-blueColor = "#1D4ED8"
-violetColor = "#6D28D9"
-grayColor = "#64748B"
+# Status badge colours: lighter tints, readable on navy
+greenColor = "#4ADE80"
+orangeColor = "#FBBF24"
+redColor = "#F87171"
+blueColor = "#60A5FA"
+violetColor = "#A78BFA"
+grayColor = "#94A3B8"
 
 [theme.sidebar]
-backgroundColor = "#0B1F3A"         # deep navy
-secondaryBackgroundColor = "#13294B"
-textColor = "#E6ECF5"
-borderColor = "#1E3A5F"
+backgroundColor = "#223559"         # navy
+secondaryBackgroundColor = "#30466E"
+textColor = "#F8FAFC"
+borderColor = "#4A5E85"
 primaryColor = "#5EEAD4"            # light teal, readable on navy
+
+[client]
+toolbarMode = "minimal"            # hide the developer menu and Deploy button

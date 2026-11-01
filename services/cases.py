@@ -17,7 +17,7 @@ from services.validator import normalise_company_name
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
 DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn", "country", "registration_number",
-                 "stated_industry")
+                 "stated_industry", "owner")  # owner: whoever created the assessment, until an analyst reassigns it
 
 
 def new_case_id() -> str:
@@ -42,13 +42,15 @@ def save_case(case_id: str, details: dict, documents: list[UploadedDocument], fo
         if not target.exists():
             target.write_bytes(document.data)
     case_json = path / "case.json"
-    supporting = json.loads(case_json.read_text()).get("supporting", []) if case_json.exists() else []
+    earlier = json.loads(case_json.read_text()) if case_json.exists() else {}
+    supporting = earlier.get("supporting", [])
+    owner = details.get("owner", "").strip() or earlier.get("details", {}).get("owner", "")  # blank keeps the owner
     keep = {d.fingerprint for d in documents} | {s["sha256"] for s in supporting}
     for old in stored.iterdir():
         if old.name not in keep:
             old.unlink()  # a document removed from the review
     record = {
-        "details": {field: details.get(field, "") for field in DETAIL_FIELDS},
+        "details": {**{field: details.get(field, "") for field in DETAIL_FIELDS}, "owner": owner.strip()},
         "documents": [{"name": d.name, "media_type": d.media_type, "sha256": d.fingerprint,
                        "description": d.description} for d in documents],
         "supporting": supporting,
@@ -151,6 +153,7 @@ def list_cases(folder: Path | None = None) -> list[dict]:
             "entity_name": record["details"].get("entity_name", ""),
             "entity_key": entity_key(record["details"]),
             "company_link": record["details"].get("company_link", ""),
+            "owner": record["details"].get("owner", ""),
             "documents": len(record["documents"]),
             "saved_at": record["saved_at"],
         })

@@ -6,42 +6,173 @@
       {
         "file_number": 1,
         "document_type": "certificate_of_incorporation",
-        "reason": "Companies House certificate stating Example Payments Ltd was incorporated on 14 March 2019 under company number 99999901."
+        "reason": "Companies House certificate stating Example Payments Ltd was incorporated on 14 March 2019 under company number 99999901.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "99999901",
+        "registered_address": "",
+        "document_date": "2019-03-14",
+        "people": [],
+        "owners": []
       },
       {
         "file_number": 2,
         "document_type": "articles_of_association",
-        "reason": "Articles of association adopting the model articles, with rules on directors' authority, execution of documents, quorum and share capital."
+        "reason": "Articles of association adopting the model articles, with rules on directors' authority, execution of documents, quorum and share capital.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "99999901",
+        "registered_address": "",
+        "document_date": "2019-03-14",
+        "people": [],
+        "owners": []
       },
       {
         "file_number": 3,
         "document_type": "board_resolution",
-        "reason": "Directors' written resolution authorising the bank accounts and naming Alex Sample and Jamie Example as signatories, any two to sign."
+        "reason": "Directors' written resolution authorising the bank accounts and naming Alex Sample and Jamie Example as signatories, any two to sign.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "99999901",
+        "registered_address": "",
+        "document_date": "2026-09-02",
+        "people": [
+          {
+            "name": "Alex Sample",
+            "role": "director, signatory"
+          },
+          {
+            "name": "Jamie Example",
+            "role": "director, signatory"
+          },
+          {
+            "name": "Sam Placeholder",
+            "role": "director"
+          }
+        ],
+        "owners": []
       },
       {
         "file_number": 4,
         "document_type": "proof_of_address",
-        "reason": "Business electricity bill dated 2 September 2026 addressed to the company at 1 Example Street, London EX1 1AA."
+        "reason": "Business electricity bill dated 2 September 2026 addressed to the company at 1 Example Street, London EX1 1AA.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "",
+        "registered_address": "1 Example Street, London EX1 1AA",
+        "document_date": "2026-09-02",
+        "people": [],
+        "owners": []
       },
       {
         "file_number": 5,
         "document_type": "identity_document",
-        "reason": "Third-party identity verification report confirming passport and driving licence checks for Alex Sample and Jamie Example only."
+        "reason": "Third-party identity verification report confirming passport and driving licence checks for Alex Sample and Jamie Example only.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "",
+        "registered_address": "",
+        "document_date": "2026-09-03",
+        "people": [
+          {
+            "name": "Alex Sample",
+            "role": "ID holder"
+          },
+          {
+            "name": "Jamie Example",
+            "role": "ID holder"
+          }
+        ],
+        "owners": []
       },
       {
         "file_number": 6,
         "document_type": "onboarding_questionnaire",
-        "reason": "Completed onboarding and AML questionnaire covering regulatory status, ownership, business model, source of funds and financial crime controls."
+        "reason": "Completed onboarding and AML questionnaire covering regulatory status, ownership, business model, source of funds and financial crime controls.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "",
+        "registered_address": "",
+        "document_date": "2026-09-01",
+        "people": [
+          {
+            "name": "Sam Placeholder",
+            "role": "Chief Risk Officer and MLRO"
+          },
+          {
+            "name": "Alex Sample",
+            "role": "beneficial owner"
+          },
+          {
+            "name": "Jamie Example",
+            "role": "beneficial owner"
+          }
+        ],
+        "owners": [
+          {
+            "name": "Alex Sample",
+            "share": "60%"
+          },
+          {
+            "name": "Jamie Example",
+            "share": "28%"
+          },
+          {
+            "name": "Example Ventures Fund I LP",
+            "share": "the remaining shares"
+          }
+        ]
       },
       {
         "file_number": 7,
         "document_type": "register_of_directors",
-        "reason": "Register listing the three directors with dates of birth, service addresses, appointment dates and roles as at 1 September 2026."
+        "reason": "Register listing the three directors with dates of birth, service addresses, appointment dates and roles as at 1 September 2026.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "99999901",
+        "registered_address": "",
+        "document_date": "2026-09-01",
+        "people": [
+          {
+            "name": "Alex Sample",
+            "role": "director (Chief Executive)"
+          },
+          {
+            "name": "Jamie Example",
+            "role": "director (Chief Technology Officer)"
+          },
+          {
+            "name": "Sam Placeholder",
+            "role": "director (Chief Risk Officer and MLRO)"
+          }
+        ],
+        "owners": []
       },
       {
         "file_number": 8,
         "document_type": "register_of_shareholders",
-        "reason": "Register of members showing shareholdings of 60%, 25% and 15% as at 1 September 2026."
+        "reason": "Register of members showing shareholdings of 60%, 25% and 15% as at 1 September 2026.",
+        "company_name": "EXAMPLE PAYMENTS LTD",
+        "registration_number": "99999901",
+        "registered_address": "",
+        "document_date": "2026-09-01",
+        "people": [
+          {
+            "name": "Alex Sample",
+            "role": "shareholder"
+          },
+          {
+            "name": "Jamie Example",
+            "role": "shareholder"
+          }
+        ],
+        "owners": [
+          {
+            "name": "Alex Sample",
+            "share": "60%"
+          },
+          {
+            "name": "Jamie Example",
+            "share": "25%"
+          },
+          {
+            "name": "Example Ventures Fund I LP",
+            "share": "15%"
+          }
+        ]
       }
     ]
   }

@@ -109,7 +109,7 @@ def test_claude_view_comes_through_with_document_names_and_pages():
     }})
     result, _ = run(reply)
     o = outcome(result, "3.2")
-    assert (o.status, o.finding, o.decided_by) == (Status.UNCLEAR, "25% on register, 28% in questionnaire", "Claude")
+    assert (o.status, o.finding, o.decided_by) == (Status.UNCLEAR, "25% on register, 28% in questionnaire", "Clario AI")
     assert o.evidence == ['questionnaire.pdf p.1: "Jamie Example (28%)"',
                           'Companies House record: "PSC: none listed"']
 
@@ -142,7 +142,7 @@ def test_check_claude_skipped_is_unclear():
     result, _ = run(answer(skip={"5.3"}))
     o = outcome(result, "5.3")
     assert o.status is Status.UNCLEAR
-    assert o.finding == "Claude did not assess this check; review it manually"
+    assert o.finding == "Clario AI did not assess this check; review it manually"
 
 
 def test_missing_documents_give_missing_and_a_request_list():

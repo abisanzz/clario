@@ -98,3 +98,20 @@ def test_validated_but_missing_lines_are_not_ready_for_approval(folders):
     lines = [(c.id, Status.MISSING, "", True) for c in REVIEWED]  # all validated, but still Missing
     save_line_reviews(case_file(case_id, "fintech_high"), assessment, lines, "A. Analyst")
     assert all_assessments(folders)[0].status == UNDER_REVIEW
+
+
+def test_older_assessments_take_their_owner_from_the_audit_log(folders):
+    from services.audit import log_event
+    case_id = make_case(folders, rated=False)
+    assert all_assessments(folders)[0].owner == "Unassigned"
+    log_event(case_file(case_id, "audit").with_suffix(".jsonl"), "A. Analyst", "Created the assessment for X")
+    assert all_assessments(folders)[0].owner == "A. Analyst"
+
+
+def test_rejected_cancelled_and_approved_assessments_are_not_active(folders):
+    from services.workflow import CANCELLED, REJECTED
+    case_id = make_case(folders, validated=3)
+    assert all_assessments(folders)[0].active
+    for status in (REJECTED, CANCELLED):
+        set_status(case_file(case_id, "status"), status, "Reason", "Abi San")
+        assert not all_assessments(folders)[0].active

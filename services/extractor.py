@@ -116,15 +116,15 @@ def ask_claude(client, content: list, schema: dict, system: str = SYSTEM_PROMPT,
         raise ExtractionFailed("no response from the Anthropic API") from error
 
     if response.stop_reason == "refusal":
-        raise ExtractionFailed("Claude declined to read this document")
+        raise ExtractionFailed("Clario AI declined to read this document")
     if response.stop_reason == "max_tokens":
-        raise ExtractionFailed("Claude's answer was cut off before it finished")
+        raise ExtractionFailed("Clario AI's answer was cut off before it finished")
 
     text = next((block.text for block in response.content if block.type == "text"), None)
     try:
         return json.loads(text), getattr(response, "usage", None)
     except (TypeError, json.JSONDecodeError) as error:
-        raise ExtractionFailed("Claude's answer could not be read") from error
+        raise ExtractionFailed("Clario AI's answer could not be read") from error
 
 
 def _fact(raw: dict, document: str) -> Fact:

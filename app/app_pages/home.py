@@ -28,7 +28,7 @@ def start_button(key: str) -> None:
         if st.button("Start a new assessment", type="primary", icon=":material/arrow_forward:", key=key):
             new_assessment()
             st.switch_page(ASSESSMENT_PAGE)
-        if list_cases() and st.button("Go to your assessments", icon=":material/folder_open:", key=f"{key}_continue"):
+        if list_cases() and st.button("Go to assessments", icon=":material/folder_open:", key=f"{key}_continue"):
             st.switch_page(ASSESSMENTS_PAGE)
 
 
@@ -57,18 +57,18 @@ start_button("start_top")
 
 st.header("What Clario does")
 cards([
-    (":material/plagiarism:", "1. Reviews your documents",
+    (":material/plagiarism:", "1. Reviews client documents",
      "Identifies each uploaded KYC document and analyses it for information relevant to client due diligence."),
     (":material/table_view:", "2. Extracts key information",
      "Organises entity, ownership, people and business information into a structured, easy-to-review format."),
     (":material/flag:", "3. Highlights potential issues",
      "Flags missing information, inconsistencies between documents, and details that don't match Companies House "
      "or the FCA register."),
-    (":material/rate_review:", "4. Supports your review",
+    (":material/rate_review:", "4. Supports the analyst's review",
      "Gives findings with document and page references, so a reviewer can validate them and decide the next steps."),
     (":material/speed:", "5. Suggests a risk rating",
-     "Rates customer, product, geography and delivery channel risk against your methodology and flags enhanced due "
-     "diligence triggers. Your confirmed rating sets the checklist: simplified, standard or enhanced."),
+     "Rates customer, product, geography and delivery channel risk against the firm's risk methodology and flags enhanced due "
+     "diligence triggers. The confirmed rating sets the checklist: simplified, standard or enhanced."),
 ])
 
 # --- What you'll get ---
@@ -121,14 +121,13 @@ with right.container(border=True):
     )
 
 with st.container(border=True):
-    st.markdown("**:material/lock: How your information is handled**")
+    st.markdown("**:material/lock: How client information is handled**")
     st.markdown(
-        "- Uploaded documents are sent to Anthropic's API so Claude can read them.\n"
-        "- Each review (its details, documents and progress) is saved on the computer running Clario when you "
-        "click Next or Save as draft, so you can reopen it later to add documents or edit details.\n"
-        "- The company number and FCA firm reference number you enter are looked up on the public Companies House "
-        "and FCA registers.\n"
-        "- A reviewer's changes to results are saved only on the computer running Clario."
+        "- Documents are processed by Clario's AI service, provided by Anthropic, a third-party AI provider.\n"
+        "- Each assessment (its details, documents, line reviews, approvals and audit log) is kept in Clario's case "
+        "store, so it can be reopened, amended and reviewed again at its next periodic review.\n"
+        "- The company number and FCA firm reference number are looked up on the public Companies House and FCA "
+        "registers."
     )
 
 st.info(

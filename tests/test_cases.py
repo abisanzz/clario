@@ -190,3 +190,13 @@ def test_document_comments_are_kept_with_the_draft(tmp_path):
     case_id = new_case_id()
     save_progress(case_id, "pack-1", [], None, folder=tmp_path, comments={"bill.pdf": "Older than 3 months"})
     assert load_progress(case_id, folder=tmp_path)["comments"] == {"bill.pdf": "Older than 3 months"}
+
+
+def test_the_creator_owns_an_assessment_until_it_is_reassigned(tmp_path):
+    case_id = new_case_id()
+    save_case(case_id, {**DETAILS, "owner": "A. Analyst"}, [CERT], folder=tmp_path)
+    save_case(case_id, {**DETAILS, "owner": ""}, [CERT], folder=tmp_path)  # a save with no owner keeps it
+    assert load_case(case_id, folder=tmp_path)[0]["owner"] == "A. Analyst"
+    save_case(case_id, {**DETAILS, "owner": "B. Analyst"}, [CERT], folder=tmp_path)  # reassigned
+    assert load_case(case_id, folder=tmp_path)[0]["owner"] == "B. Analyst"
+    assert list_cases(tmp_path)[0]["owner"] == "B. Analyst"

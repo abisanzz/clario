@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="168" height="40" viewBox="0 0 168 40">
-  <rect x="0" y="4" width="32" height="32" rx="8" fill="#14B8A6"/>
-  <path d="M10 21.5l4.5 4.5L23 16" fill="none" stroke="#0B1F3A" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="42" y="28" font-family="Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF" letter-spacing="0.3">Clario</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="176" height="40" viewBox="0 0 176 40">
+  <rect x="0" y="2" width="36" height="36" rx="9" fill="#3E9C8F"/>
+  <path d="M18 10.5l7.5 3v5.6c0 4.6-3.1 8.5-7.5 9.9-4.4-1.4-7.5-5.3-7.5-9.9v-5.6z" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M14.6 19.6l2.4 2.4 4.4-4.6" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="48" y="29" font-family="Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#FFFFFF" letter-spacing="0.5">CLARIO</text>
 </svg>

@@ -4,12 +4,19 @@ import streamlit as st
 
 from services.cases import load_case, load_progress, load_supporting
 
+# Made-up team members for the demo sign-in: no passwords, no real accounts
+TEAM = {
+    "Abi San": "KYC Team Lead",
+    "Priya Shah": "KYC Analyst",
+    "Tom Okafor": "Senior KYC Analyst",
+    "Hannah Ellis": "Senior Manager, Compliance",
+}
 ASSESSMENT_PAGE = "app_pages/review.py"
 ASSESSMENTS_PAGE = "app_pages/assessments.py"
 WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "registration_", "stated_industry_",
-                   "source")
+                   "owner", "source")
 REVIEW_STATE = ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key", "risk",
-                "section_reads", "line_versions", "delete_pending")
+                "section_reads", "line_versions", "delete_pending", "line_filter")
 
 
 def start_over(entity: dict, case_id: str | None) -> None:

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.audit import load_events
+from services.audit import NO_NAME, load_events
 from services.cases import latest_reviews, load_progress
 from services.checklist import CHECKLISTS, load_checks
 from services.cycles import approved_snapshots, current_cycle, cycle_key, load_submission
@@ -45,6 +45,7 @@ class AssessmentSummary:
     next_review: str = ""  # YYYY-MM-DD, once approved
     cycle: int = 1  # 1 for onboarding, then one more for each periodic review
     ready: bool = False  # every line is Present and validated, so it can be submitted for approval
+    owner: str = ""  # whoever created the assessment, or the analyst it was reassigned to
 
     @property
     def next_action(self) -> str:
@@ -61,7 +62,7 @@ class AssessmentSummary:
 
     @property
     def active(self) -> bool:
-        """Still being worked on: not approved, rejected or cancelled."""
+        """Still being worked on. Approved, rejected and cancelled assessments are not active."""
         return self.status in (NOT_STARTED, IN_PROGRESS, UNDER_REVIEW, PENDING_APPROVAL, ON_HOLD)
 
     @property
@@ -107,8 +108,21 @@ def summarise(draft: dict, folder: Path | None = None) -> AssessmentSummary:
         INDUSTRIES.get(industry_key, ""), CHECKLISTS[checklist_key][0] if checklist_key in CHECKLISTS else "",
         decision.rating if decision else "", validated, lines, status, approval.approver if approval else "",
         draft["saved_at"].replace("T", " ")[:16], manual.reason if manual else "", next_review, cycle,
-        bool(lines) and complete >= lines,
+        bool(lines) and complete >= lines, owner_of(draft),
     )
+
+
+UNASSIGNED = "Unassigned"
+
+
+def owner_of(draft: dict) -> str:
+    """The assessment's owner: who created it, unless it was reassigned. For assessments saved before owners were
+    recorded, the name on the audit log's creation entry, if there is one."""
+    if draft.get("owner"):
+        return draft["owner"]
+    created = next((e for e in load_events(case_file(draft["id"], "audit").with_suffix(".jsonl"))
+                    if e.what.startswith("Created the assessment")), None)
+    return created.who if created and created.who not in ("", NO_NAME) else UNASSIGNED
 
 
 def all_assessments(folder: Path | None = None) -> list[AssessmentSummary]:
@@ -138,7 +152,7 @@ def activity_kind(who: str, what: str) -> str:
     """Sort an audit log entry into the dashboard's kinds of activity."""
     if what.startswith("Created the assessment"):
         return CREATION
-    if who in ("Claude", "Clario"):
+    if who in ("Claude", "Clario", "Clario AI"):
         return AI_PROCESSING
     if what.startswith(("Uploaded document", "Added supporting document", "Deleted document", "Removed document")):
         return DOCUMENT_UPLOAD

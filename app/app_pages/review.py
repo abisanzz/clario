@@ -71,6 +71,7 @@ from services.cases import (  # noqa: E402
 )
 from services.checklist import CHECKLISTS, load_checks  # noqa: E402
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
+from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
     DOCUMENT_TYPES,
@@ -81,6 +82,7 @@ from services.pack import (  # noqa: E402
     apply_entity_name,
     assess_pack,
     companies_house_source,
+    extract_details,
     fca_source,
     identify_documents,
     pack_fingerprint,
@@ -109,6 +111,7 @@ from services.risk import (  # noqa: E402
 from services.supporting import read_supporting_document  # noqa: E402
 from services.validator import Status, entity_name_matches  # noqa: E402
 from services.website import WebsiteFetchFailed, website_text  # noqa: E402
+from services.wording import product_voice  # noqa: E402
 
 SAMPLES = PROJECT_ROOT / "sample_documents"
 SAMPLE_FILES = [SAMPLES / "certificate_of_incorporation.pdf"] + sorted((SAMPLES / "pack").glob("*.pdf"))
@@ -281,6 +284,8 @@ def save_draft(details: dict, documents: list[UploadedDocument]) -> None:
     """Save the review on this computer. One review per legal entity: this replaces any other saved review of it."""
     stored = documents if details["source"] == "Upload documents" else []  # the sample's files stay where they are
     is_new = not st.session_state.get("case_id")
+    if is_new and details.get("owner"):
+        st.session_state.last_reviewer = details["owner"]
     before = {d.fingerprint: d.name for d in saved.get("documents", [])} if not is_new else {}
     case_id = save_review(st.session_state.get("case_id"), details, stored)
     st.session_state.case_id = case_id
@@ -289,6 +294,8 @@ def save_draft(details: dict, documents: list[UploadedDocument]) -> None:
         log_event(log_path, who, f"Created the assessment for {details['entity_name'] or 'an unnamed entity'}"
                   + (" (sample pack)" if details["source"] == "Sample pack" else ""))
     after = {d.fingerprint: d.name for d in stored}
+    if not is_new and saved.get("owner") and details.get("owner") and details["owner"] != saved["owner"]:
+        log_event(log_path, who, f"Changed the owner from {saved['owner']} to {details['owner']}")
     for fingerprint, name in after.items():
         if fingerprint not in before:
             log_event(log_path, who, f"Uploaded document {name}")
@@ -316,10 +323,16 @@ def details_tab() -> None:
         "Clario lists what to request from the client and what to check on public registers. Every finding shows "
         "where it came from, for you to validate."
     )
+    owner = st.text_input(
+        "Assessment owner", value=saved.get("owner") or st.session_state.get("last_reviewer", ""), key="owner",
+        width=300,
+        help="Whoever creates the assessment owns it. An analyst can reassign it to someone else; the change is "
+             "recorded in the audit history when you save.",
+    )
     with st.container(border=True):
         st.subheader(":material/upload_file: Legal Entity Information")
         # The documents choice sits below the fields but decides what they are filled with, so read its last setting
-        source = st.session_state.get("source") or saved.get("source") or "Sample pack"
+        source = st.session_state.get("source") or saved.get("source") or "Upload documents"
 
         entity_name = st.text_input(
             "Legal Entity Full Name",
@@ -388,13 +401,15 @@ def details_tab() -> None:
                     st.rerun()
 
         source = st.segmented_control(
-            "Documents", ["Sample pack", "Upload documents"], default=saved.get("source", "Sample pack"), key="source"
-        ) or "Sample pack"
+            "Documents", ["Upload documents", "Sample pack"], default=saved.get("source", "Upload documents"),
+            key="source",
+            format_func=lambda choice: {"Sample pack": "Example case", "Upload documents": "Client documents"}[choice],
+        ) or "Upload documents"
         if source == "Sample pack":
             documents = SAMPLE_DOCUMENTS
             st.caption(
-                f"{len(documents)} specimen documents for the fictitious EXAMPLE PAYMENTS LTD, with deliberate gaps. "
-                "Saved answers are replayed, so the sample costs nothing to run."
+                f"The {len(documents)}-document example case for EXAMPLE PAYMENTS LTD, used for training and "
+                "walkthroughs. It includes typical gaps an analyst would raise with the client."
             )
             st.pills("Files", [d.name for d in documents], disabled=True, label_visibility="collapsed")
         else:
@@ -420,29 +435,31 @@ def details_tab() -> None:
                         f"What does {document.name} show? (optional)", value=document.description,
                         key=f"doc_description_{document.fingerprint}", label_visibility="collapsed",
                         placeholder="What does this document show? e.g. Register of members, dated 20 Oct 2026",
-                        help="Claude reads this as a hint when identifying the document and running the checks.")
+                        help="Clario AI reads this as a hint when identifying the document and running the checks.")
                     described.append(replace(document, description=text.strip()))
                 documents = described
             st.caption(
-                ":material/lock: Only upload fictitious or approved documents: files are sent to Anthropic to be read.")
+                ":material/lock: Documents are processed by Clario's AI service. Upload only documents your "
+                "data-handling policy permits.")
 
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
                "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
-               "stated_industry": stated_industry}
+               "stated_industry": stated_industry, "owner": owner.strip()}
     with st.container(horizontal=True):
-        if st.button("Save as draft", icon=":material/save:"):
+        if st.button("Save as draft", icon=":material/save:", disabled=not owner.strip()):
             save_draft(details, documents)
-            st.toast(f"Saved on this computer. Its review ID is {review_id(st.session_state.case_id)}: find it any "
-                     "time in KYC Assessments.", icon=":material/check_circle:")
-        if st.button("Save and continue", type="primary", icon=":material/arrow_forward:", disabled=not documents):
+            st.toast(f"Draft saved: {review_id(st.session_state.case_id)}. Find it any time in Assessments.",
+                     icon=":material/check_circle:")
+        if st.button("Save and continue", type="primary", icon=":material/arrow_forward:",
+                     disabled=not documents or not owner.strip()):
             save_draft(details, documents)  # every review is saved, so it can be reopened and amended later
             go("documents")
-    if not documents:
+    if not owner.strip():
+        st.caption("Enter the assessment owner to save.")
+    elif not documents:
         st.caption("Add at least one document to continue.")
-    elif source == "Upload documents":
-        st.caption(f"Save and continue asks Claude to identify each document (roughly 1p per document, about "
-                   f"${len(documents) * 0.011:.2f} for these {len(documents)}). A reopened draft with the same "
-                   "documents costs nothing.")
+    else:
+        st.caption("Save and continue: Clario identifies each document and extracts its key details.")
     st.stop()
 
 # --- The assessment's tabs ---
@@ -514,8 +531,8 @@ summary = [("Incorporated in", country), ("Company", company_link),
            ("Documents", f"{len(documents)} files")]
 st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
 if st.session_state.get("case_id"):
-    st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · :material/cloud_done: Saved on "
-               "this computer; reopen it any time from KYC Assessments.")
+    st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · :material/cloud_done: All "
+               "changes saved")
 
 # Start again whenever the set of documents changes
 pack_key = pack_fingerprint(documents)
@@ -668,10 +685,11 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
             st.warning(
                 ("Delete these documents?\n\n" + "\n".join(f"- {m}" for m in message)
                  + "\n\nDeleting them will change anything listed: it will be worked out again without them."
-                 + ("  \nThe remaining documents will be identified and checked again (roughly 3-4p per document "
-                    "for your own uploads). Your line reviews, risk rating and approval are kept."
+                 + ("  \nThe remaining documents will be identified and checked again. Your line reviews, risk "
+                    "rating and approval are kept."
                     if any(not r for _, r in deletable) else "") if deletable else "Nothing can be deleted.")
-                + (f"  \nThe sample's documents cannot be deleted, so these will be skipped: {', '.join(skipped)}."
+                + (f"  \nThe example case's documents cannot be deleted, so these will be skipped: "
+                   f"{', '.join(skipped)}."
                    if skipped else ""),
                 icon=":material/delete:")
             with st.container(horizontal=True):
@@ -708,7 +726,8 @@ with tabs[5]:
         st.subheader(":material/history: Audit history")
         st.caption("Every change to this assessment, with who made it and when. Entries are only ever added.")
         if events:
-            st.dataframe(pd.DataFrame([{"Time": e.at, "Who": e.who, "Line": e.line, "What": e.what} for e in events]),
+            st.dataframe(pd.DataFrame([{"Time": e.at, "Who": product_voice(e.who), "Line": e.line,
+                                       "What": product_voice(e.what)} for e in events]),
                          hide_index=True, column_config={"What": st.column_config.TextColumn(width="large")})
             st.download_button("Download the audit log (CSV)", events_csv(events), file_name="clario-audit-log.csv",
                                mime="text/csv", icon=":material/download:")
@@ -726,20 +745,90 @@ def needs_first(tab: str, step: str) -> None:
     st.stop()
 
 
-# --- Screen 2: what each document is ---
+# --- Screen 2: what each document is, and the key details each one shows ---
+
+
+def detail_lines(found) -> list[str]:
+    lines = [f"**{title}:** {value}" for title, value in [
+        ("Company name", found.company_name), ("Registration number", found.registration_number),
+        ("Registered address", found.registered_address), ("Document date", found.document_date)] if value]
+    if found.people:
+        lines.append("**People:** " + "; ".join(f"{name} ({role})" if role else name for name, role in found.people))
+    if found.owners:
+        lines.append("**Owners:** " + "; ".join(f"{name}: {share}" if share else name for name, share in found.owners))
+    return lines
+
+
+def show_key_facts(identification) -> None:
+    """The details from every document side by side, with what they disagree on flagged."""
+    with st.container(border=True):
+        st.subheader(":material/manage_search: Key facts across the documents")
+        if not identification.extracted:
+            st.caption("Key details (company name, registration number, address, dates, people and owners) have not "
+                       "been extracted for these documents yet. Extract them to compare the documents; the document "
+                       "types stay as they are.")
+            if st.button("Extract the details", icon=":material/manage_search:"):
+                with st.spinner(f"Clario is extracting the details from {len(documents)} documents..."):
+                    try:
+                        st.session_state.identification = extract_details(
+                            documents, identification, saved_answer=saved_answers.get("labels"))
+                    except (ExtractionFailed, UnsupportedFile) as error:
+                        st.error(f"Could not extract the details: {error}", icon=":material/error:")
+                    else:
+                        log_event(audit_path, "Clario", f"Extracted the details of {len(documents)} documents "
+                                  f"(AI usage ${st.session_state.identification.cost_usd:.3f})")
+                        st.rerun()
+            return
+        details = identification.details
+        facts = key_facts(details)
+        if not facts and not people(details) and not owners(details):
+            st.caption("No company details were found in these documents.")
+            return
+        st.caption("What each document says, as printed. Differences in capitals, punctuation and Limited/Ltd are "
+                   "ignored. Validate anything flagged.")
+        names = {normalise(value) for fact in facts if fact.fact == "Company name" for value in fact.values}
+        if entity_name.strip() and names and normalise(entity_name) not in names:
+            st.warning(f"**The Legal Entity name you entered ({entity_name}) is not the name on the documents.**",
+                       icon=":material/warning:")
+        for fact in facts:
+            if fact.disagree:
+                st.warning(f"**{fact.fact}: the documents disagree.**\n" + "\n".join(
+                    f"- {value}: {', '.join(found_in)}" for value, found_in in fact.values.items()),
+                    icon=":material/warning:")
+            else:
+                [(value, found_in)] = fact.values.items()
+                st.markdown(f":material/check_circle: **{fact.fact}:** {value}")
+                st.caption(f"In {', '.join(found_in)}")
+        named = people(details)
+        if named:
+            st.markdown("**People named**")
+            st.dataframe(pd.DataFrame([{"Name": name, "Roles": ", ".join(roles), "Found in": ", ".join(found_in)}
+                                       for name, roles, found_in in named]), hide_index=True, height="content")
+        owned = owners(details)
+        if owned:
+            st.markdown("**Ownership**")
+            st.dataframe(pd.DataFrame([{
+                "Owner": name,
+                "Share": " / ".join(shares),
+                "Found in": "; ".join(f"{share}: {', '.join(found_in)}" if len(shares) > 1 else ", ".join(found_in)
+                                      for share, found_in in shares.items()),
+                "Check": "Documents disagree" if len(shares) > 1 else "",
+            } for name, shares in owned]), hide_index=True, height="content")
+
+
 
 if screen == "documents":
     with tabs[1]:
         with st.container(border=True):
             st.subheader(":material/plagiarism: Check what each document is")
             if "identification" not in st.session_state:  # identify straight away when this screen opens
-                with st.spinner(f"Claude is reading the {len(documents)} documents..."):
+                with st.spinner(f"Clario is reading the {len(documents)} documents..."):
                     try:
                         st.session_state.identification = identify_documents(
                             documents, saved_answer=saved_answers.get("labels"))
                         found = st.session_state.identification
                         log_event(audit_path, "Clario", f"Identified {len(found.labels)} documents"
-                                  + (" (saved answer replayed, no cost)" if found.replayed else f" (about ${found.cost_usd:.3f})"))
+                                  + ("" if found.replayed else f" (AI usage ${found.cost_usd:.3f})"))
                     except (ExtractionFailed, UnsupportedFile) as error:
                         st.error(f"Could not identify the documents: {error}", icon=":material/error:")
                         st.button("Try again", icon=":material/refresh:")
@@ -747,8 +836,8 @@ if screen == "documents":
                 identification = st.session_state.identification
                 shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
                 description_of = {d.name: d.description for d in documents}
-                st.caption("Change a document type if Claude got it wrong (the checks use these), and add any comments. "
-                           "Open a file's **Details** to see why Claude thinks so.")
+                st.caption("Correct any document type that is wrong (the checks use these) and add comments. Open "
+                           "a file's **Details** to see why Clario AI chose its type.")
                 comments_before = st.session_state.get("label_comments", {})
                 claude_types = {label.name: label.document_type for label in identification.labels}
                 widths = [3, 3, 4]
@@ -769,13 +858,19 @@ if screen == "documents":
                         key=f"label_comment_{pack_key}_{number}", label_visibility="collapsed",
                         placeholder="Required: why did you change the document type?" if type_changed else "Comments")
                     with st.expander("Details"):
-                        st.markdown(f"**Why Claude thinks so:** {label.reason or 'No reason given.'}")
+                        st.markdown(f"**Why Clario AI chose this type:** {product_voice(label.reason) or 'No reason given.'}")
                         st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
+                        found = identification.details.get(label.name)
+                        if found and not found.empty:
+                            st.markdown("**What it shows:**\n" + "\n".join(f"- {line}" for line in detail_lines(found)))
+                        elif identification.extracted:
+                            st.caption("No company details were found in this document.")
                     confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
                     if comment.strip():
                         comments[label.name] = comment.strip()
-                st.caption("Labels: replayed, $0.00" if identification.replayed
-                           else f"Labels: about ${identification.cost_usd:.3f}")
+
+        if "identification" in st.session_state:
+            show_key_facts(st.session_state.identification)
         def save_labels(quiet: bool = False) -> bool:
             """Keep the document types and comments, and record what changed in the audit log. A document type
             changed from Claude's needs a comment; if one is missing nothing is saved."""
@@ -784,7 +879,7 @@ if screen == "documents":
             if missing:
                 if not quiet:
                     st.error("Add a comment for " + ", ".join(missing) + ": you changed the document type from "
-                             "Claude's.", icon=":material/error:")
+                             "the one Clario AI suggested.", icon=":material/error:")
                 return False
             before = {label.name: label for label in shown}
             who = st.session_state.get("last_reviewer", "")
@@ -798,9 +893,7 @@ if screen == "documents":
             return True
 
         navigation("Next", "identification" in st.session_state, save=save_labels)
-        if source == "Upload documents":
-            st.caption("Next asks Claude to suggest the industry and an initial risk rating (roughly 13-18p together). A "
-                       "reopened review with unchanged documents costs nothing.")
+        st.caption("Next: Clario suggests the industry and an initial risk rating.")
         st.stop()
 
 confirmed = st.session_state.get("labels") or []
@@ -837,14 +930,14 @@ if screen == "assess":
         for warning in link_warnings:
             st.warning(warning, icon=":material/warning:")
         if "industry" not in st.session_state:  # both suggestions start straight away when this screen opens
-            with st.spinner("Claude is reading the questionnaire, the registers and the website to work out the "
+            with st.spinner("Clario is reading the questionnaire, the registers and the website to work out the "
                             "industry..."):
                 try:
                     st.session_state.industry = (links_key, suggest_industry(
                         documents, confirmed, sources, saved_answer=saved_answers.get("industry")))
                     suggested = st.session_state.industry[1]
                     log_event(audit_path, "Clario", f"Suggested the industry: {suggested.industry_label}"
-                              + (" (saved answer replayed, no cost)" if suggested.replayed else f" (about ${suggested.cost_usd:.3f})"))
+                              + ("" if suggested.replayed else f" (AI usage ${suggested.cost_usd:.3f})"))
                 except (ExtractionFailed, UnsupportedFile) as error:
                     st.error(f"Could not suggest the industry: {error}", icon=":material/error:")
                     st.button("Try again", icon=":material/refresh:")
@@ -853,7 +946,7 @@ if screen == "assess":
         suggestion = st.session_state.industry[1]
         risk_key = (pack_key, tuple(confirmed), suggestion.industry, tuple(sources))
         if st.session_state.get("risk", (None,))[0] != risk_key:
-            with st.spinner("Claude is rating the risk from the ownership and business documents, the registers and the "
+            with st.spinner("Clario is rating the risk from the ownership and business documents, the registers and the "
                             "website..."):
                 try:
                     st.session_state.risk = (risk_key, suggest_risk(
@@ -862,7 +955,7 @@ if screen == "assess":
                         update_saved=source != "Sample pack"))  # the sample's free demo answer is never replaced
                     rated = st.session_state.risk[1]
                     log_event(audit_path, "Clario", f"Rated the risk: {rated.overall} ({rated.why})"
-                              + (" (saved answer replayed, no cost)" if rated.replayed else f" (about ${rated.cost_usd:.3f})"))
+                              + ("" if rated.replayed else f" (AI usage ${rated.cost_usd:.3f})"))
                 except (ExtractionFailed, UnsupportedFile) as error:
                     st.error(f"Could not suggest a risk rating: {error}", icon=":material/error:")
                     st.button("Try again", icon=":material/refresh:")
@@ -876,7 +969,7 @@ if screen == "assess":
             chosen_industry = suggestion.industry
 
         st.subheader(":material/fact_check: Industry, risk rating and checklist")
-        st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Claude's "
+        st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Clario AI's "
                    "reasons and evidence.")
 
         # Risk rating on the left, industry and checklist on the right. The right-hand card is filled first because the
@@ -896,7 +989,7 @@ if screen == "assess":
                                "documents. Check which is right.")
                 industry = INDUSTRY_KEY[st.selectbox(
                     "Override Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
-                    key=f"industry_{hash(links_key)}", help="Change this if Claude got it wrong.",
+                    key=f"industry_{hash(links_key)}", help="Change this if the suggested industry is wrong.",
                 )]
                 with st.expander("Why this industry?"):
                     st.markdown(suggestion.reason)
@@ -906,7 +999,6 @@ if screen == "assess":
                         st.caption(SOURCES_AGREE[suggestion.sources_agree])
                     if suggestion.evidence:
                         st.markdown("**Evidence**\n" + "\n".join(f"- {quote}" for quote in suggestion.evidence))
-                    st.caption("Replayed, $0.00" if suggestion.replayed else f"About ${suggestion.cost_usd:.3f}")
             with checklist_side:
                 st.markdown("**:material/checklist: Checklist**")
                 checklist_slot = st.container()  # filled in below, once the risk rating is known
@@ -943,7 +1035,6 @@ if screen == "assess":
                                 f"{rated.reasons}")
                     if rated.evidence:
                         st.caption("\n".join(f"- {quote}" for quote in rated.evidence))
-                st.caption("Replayed, $0.00" if risk.replayed else f"About ${risk.cost_usd:.3f}")
 
         # The checklist follows the industry and the risk rating; it cannot be changed on its own
         checklist, written_for_industry = checklist_for(industry, final)
@@ -1022,13 +1113,7 @@ if screen == "assess":
                                      else "") + f"; checklist {CHECKLISTS[checklist][0]}")
                     remember(choice=(industry, checklist))
                     go("results")
-        if source == "Upload documents":
-            st.caption(f"Next saves your choices and runs the KYC checks: Claude reads every document again against the "
-                       f"checklist (roughly 3p per document, about ${len(documents) * 0.027:.2f} for these "
-                       f"{len(documents)}). A reopened review with unchanged documents and checklist costs nothing.")
-        elif checklist != SAMPLE_CHECKLIST:
-            st.caption(f":material/payments: The sample's saved answer is for the {CHECKLISTS[SAMPLE_CHECKLIST][0]} "
-                       "checklist. With this checklist, Next asks Claude to run the checks again (about 20p).")
+        st.caption("Next saves your choices and runs the KYC checks against the checklist.")
         st.stop()
 
 decision = load_risk_decision(decision_path)
@@ -1047,7 +1132,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     if "assessment" not in st.session_state:
         replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
         sources, _ = fetch_links(company_link, website, fca_frn)
-        with st.spinner(f"Claude is checking the {len(documents)} documents against every item on the "
+        with st.spinner(f"Clario is checking the {len(documents)} documents against every item on the "
                         f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
             try:
                 st.session_state.assessment = ((confirmed, checklist), assess_pack(
@@ -1056,7 +1141,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 ))
                 checked = st.session_state.assessment[1]
                 log_event(audit_path, "Clario", f"Checked {len(documents)} documents against the "
-                          f"{CHECKLISTS[checklist][0]} checklist" + (" (saved answer replayed, no cost)" if checked.replayed else f" (about ${checked.cost_usd:.3f})"))
+                          f"{CHECKLISTS[checklist][0]} checklist" + ("" if checked.replayed else f" (AI usage ${checked.cost_usd:.3f})"))
             except ExtractionFailed as error:
                 st.error(f"Could not run the checks: {error}", icon=":material/error:")
                 st.button("Try again", icon=":material/refresh:")
@@ -1108,7 +1193,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 st.dataframe(pd.DataFrame([{
                     "Line": line.id, "Check": line.check, "Status": STATUS_TEXT[Status(line.status)],
                     "Validated by": line.validated_by, "Comment": line.comment, "Finding": line.finding,
-                } for line in section_lines]), hide_index=True, key=f"frozen_{key}_{section}",
+                } for line in section_lines]), hide_index=True, height="content", key=f"frozen_{key}_{section}",
                     column_config={"Check": st.column_config.TextColumn(width="large"),
                                    "Finding": st.column_config.TextColumn(width="large")})
         if frozen.documents:
@@ -1174,27 +1259,39 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 st.markdown(f"**:material/autorenew: {cycle_name(cycle)}** started from the checklist approved on "
                             f"{history[0].approved_on} by {history[0].approved_by}. Each line keeps its approved status "
                             "and comment; validate every line again, then submit for approval.")
-        total = identification.cost_usd + suggestion.cost_usd + original.cost_usd
-        st.caption("Checks: replayed, $0.00" if original.replayed
-                   else f"Checks: about ${original.cost_usd:.3f}. Total for this company: about ${total:.3f}")
-        with st.container(horizontal=True):
-            for status, help_text in [
-                (Status.PRESENT, "The evidence is there and consistent"),
-                (Status.MISSING, "Not provided"),
-                (Status.UNCLEAR, "Incomplete, out of date or inconsistent"),
-                (Status.NEEDS_HUMAN_REVIEW, "A judgement call for an analyst"),
-                (Status.NOT_STARTED, "Screening and analyst decisions, done outside this tool"),
+        # Status tiles: click View to show only the lines with that status
+        line_filter = st.session_state.get("line_filter")
+        with st.container(horizontal=True, wrap=True):
+            for status, short, help_text in [
+                (Status.PRESENT, "Evidence in place", "The evidence is there and consistent"),
+                (Status.MISSING, "Not provided", "Not provided by the client"),
+                (Status.UNCLEAR, "Needs clarifying", "Incomplete, out of date or inconsistent"),
+                (Status.NEEDS_HUMAN_REVIEW, "Analyst judgement", "A judgement call for an analyst"),
+                (Status.NOT_STARTED, "Done outside Clario", "Screening and analyst decisions, done outside Clario"),
             ]:
-                st.metric(STATUS_TEXT[status], sum(o.status is status for o in review_outcomes), help=help_text,
-                          border=True)
+                with st.container(border=True, width=228, height=180, vertical_alignment="distribute"):
+                    with st.container(gap=None):
+                        st.markdown(f"**{STATUS_TEXT[status]}**")
+                        st.header(str(sum(o.status is status for o in review_outcomes)), anchor=False)
+                        st.caption(short, help=help_text)
+                    showing = line_filter == status.value
+                    st.button("Showing" if showing else "View", key=f"line_filter_{status.name}", type="tertiary",
+                              icon=":material/check:" if showing else ":material/arrow_forward:", disabled=showing,
+                              on_click=st.session_state.update, kwargs={"line_filter": status.value})
 
         left, right = st.columns(2)
-        for column, title, icon, gaps, empty in [
-            (left, "Request from client", ":material/mail:", result.request_from_client(), "Nothing to request."),
-            (right, "Check on public registers", ":material/account_balance:", result.check_on_registers(), "Nothing to check."),
+        for column, title, gaps, empty, to_do in [
+            (left, "Request from client", result.request_from_client(), "Nothing to request.", "to request"),
+            (right, "Check on public registers", result.check_on_registers(), "Nothing to check.", "to check"),
         ]:
-            with column.container(border=True):
-                st.subheader(f"{icon} {title}")
+            # A clear signal above each section: action required while anything is outstanding
+            if gaps:
+                column.badge("Action required", icon=":material/priority_high:", color="orange")
+                label = f"**{title}** · {len(gaps)} item{'s' if len(gaps) > 1 else ''} {to_do}"
+            else:
+                column.badge("Complete", icon=":material/check:", color="green")
+                label = f"**{title}** · Nothing outstanding"
+            with column.expander(label, icon=":material/warning:" if gaps else ":material/check_circle:"):
                 if not gaps:
                     st.success(empty, icon=":material/check_circle:")
                 for outcome in gaps:
@@ -1205,9 +1302,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         st.subheader("Every check, by section")
         st.caption(
             "For each line: tick **Validated** once you have checked it, change the **Status** if you disagree (a "
-            "**comment** is then required), and open **Details** for the finding, Claude's view, who decided and the "
-            "evidence, or to upload supporting documents. Then click **Save review**. :material/lock: Saved on this computer "
-            "only."
+            "**comment** is then required), and open **Details** for the finding, Clario AI's view, who decided and the "
+            "evidence, or to upload supporting documents. Then click **Save review**."
         )
         validated_count = sum(bool(o.validated_by) for o in review_outcomes)
         st.progress(validated_count / len(review_outcomes),
@@ -1225,13 +1321,13 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         with st.container(border=True):
             st.info(f"{len(not_yet_read)} supporting document(s) added since the checks ran: "
                     + ", ".join(r["name"] for r in not_yet_read) + ". Re-run the section they belong to (button in each "
-                    "section), or re-run all the checks, so Claude reads them with the rest of the documents.",
+                    "section), or re-run all the checks, so Clario reads them with the rest of the documents.",
                     icon=":material/attach_file:")
             if st.button("Re-run all the checks with the new documents", icon=":material/refresh:"):
                 st.session_state.entity = {**saved, "supporting": [d for d, _ in supporting_documents.values()]}
                 go("documents")
-            st.caption(f"Re-running everything reads every document again, with the industry and risk rating (about "
-                       f"${(len(documents) + len(not_yet_read)) * 0.027 + 0.15:.2f}). Your line reviews are kept.")
+            st.caption("Re-running everything reads every document again, with the industry and risk rating. Your "
+                       "line reviews are kept.")
 
 
     def rerun_section(section: str, check_ids: set[str], unread: list[tuple[UploadedDocument, dict]]) -> None:
@@ -1240,7 +1336,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         extra_labels = [DocumentLabel(document.name, "other", f"Supporting document added for check {record['check_id']}")
                         for document, record in unread]
         sources, _ = fetch_links(company_link, website, fca_frn)
-        with st.spinner(f"Claude is re-checking {section} with {len(documents) + len(extra_docs)} documents..."):
+        with st.spinner(f"Clario is re-checking {section} with {len(documents) + len(extra_docs)} documents..."):
             partial = assess_pack(documents + extra_docs, confirmed + extra_labels, sources,
                                   checklist=CHECKLISTS[checklist][1], only=check_ids)
         new_lines = {o.check.id: o for o in partial.outcomes}
@@ -1286,11 +1382,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             document = UploadedDocument(upload.name, upload.getvalue(), upload.type or "application/pdf")
             verdict = None
             if o.status is not Status.PRESENT:  # Claude reads it against this one line
-                with st.spinner(f"Claude is reading {document.name} against check {o.check.id}..."):
+                with st.spinner(f"Clario is reading {document.name} against check {o.check.id}..."):
                     try:
                         verdict = read_supporting_document(o.check, o.finding, document, description)
                     except (ExtractionFailed, UnsupportedFile) as error:
-                        st.warning(f"{document.name} was added, but Claude could not read it ({error}).",
+                        st.warning(f"{document.name} was added, but Clario could not read it ({error}).",
                                    icon=":material/warning:")
             add_supporting_document(st.session_state.case_id, document, o.check.id, reviewer,
                                     verdict=verdict.label if verdict else "",
@@ -1299,12 +1395,12 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                       + (f' ("{description.strip()}")' if description.strip() else ""), o.check.id)
             if verdict and verdict.satisfies == "yes" and o.check.id not in changed_by_you:
                 explanation = verdict.finding + "".join(f" {quote}" for quote in verdict.evidence[:1])
-                note = (f"{comment.strip()} (Claude, from {document.name}: {explanation})" if comment.strip()
-                        else f"Claude, from {document.name}: {explanation}")
+                note = (f"{comment.strip()} (Clario AI, from {document.name}: {explanation})" if comment.strip()
+                        else f"Clario AI, from {document.name}: {explanation}")
                 save_override(review_path, named, o.check.id, Status.PRESENT, note, reviewer or "Clario",
                               validated=validated, via=document.name)
             if verdict:
-                log_event(audit_path, "Claude", f"Read {document.name}: {verdict.label}"
+                log_event(audit_path, "Clario AI", f"Read {document.name}: {verdict.label}"
                           + (f" → status {o.status.value} → Present" if verdict.satisfies == "yes"
                              and o.check.id not in changed_by_you else ""), o.check.id)
         if reviewer.strip():
@@ -1338,11 +1434,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             with st.expander("Details"):
                 st.markdown(f"**Finding:** {o.finding}")
                 if o.claude_finding:
-                    st.markdown(f"**Claude's view:** {o.claude_finding}")
-                st.markdown(f"**Decided by:** {o.decided_by}"
+                    st.markdown(f"**Clario AI's view:** {product_voice(o.claude_finding)}")
+                st.markdown(f"**Decided by:** {product_voice(o.decided_by)}"
                             + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
                 if o.before_review:
-                    st.markdown(f"**Before the change:** {o.before_review}")
+                    st.markdown(f"**Before the change:** {product_voice(o.before_review)}")
                 st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
                                                 if o.evidence else " none quoted"))
                 for record in supporting_by_check.get(o.check.id, []):
@@ -1350,7 +1446,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                + (f" ({record['description']})" if record.get("description") else "")
                                + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
                                + f" on {record['added_on']}"
-                               + (f". Claude: {record['verdict']}. {record.get('verdict_finding', '')}"
+                               + (f". Clario AI: {record['verdict']}. {record.get('verdict_finding', '')}"
                                   if record.get("verdict") else ""))
             # Add a supporting document: upload, describe it and save, in a fold-out section
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
@@ -1360,10 +1456,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 description = st.text_input(
                     "What does this document show? (optional)", key=f"description_{key}",
                     placeholder="e.g. Updated register of members, dated 20 Oct 2026",
-                    help="Claude reads this with the document to understand what it is for.")
+                    help="Clario AI reads this with the document to understand what it is for.")
                 if uploads and o.status is not Status.PRESENT:
-                    st.caption(":material/smart_toy: When you save, Claude reads the document against this "
-                               "check (roughly 1-3p) and sets the line to Present if it provides the evidence.")
+                    st.caption(":material/smart_toy: When you save, Clario reads the document against this "
+                               "check and sets the line to Present if it provides the evidence.")
                 upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
                                         disabled=not uploads, help="Add the document and save this line.")
             line = (o, status, validated, comment or "", uploads or [], description or "")
@@ -1405,9 +1501,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             if approval:
                 st.caption(f"Starts the next review from the checklist approved on {last.approved_on}. Every line "
                            "keeps its approved status and comment with **Validated** cleared, so you check each one "
-                           "again and add any new documents, then submit it for approval. Nothing is "
-                           "sent to Claude, so it costs nothing; re-run a section only if you want Claude to read new "
-                           "documents.")
+                           "again and add any new documents, then submit it for approval.")
                 who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="periodic_who",
                                     width=300)
                 if st.button("Start periodic review", type="primary", icon=":material/play_arrow:",
@@ -1444,8 +1538,22 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         navigation()
         st.stop()
 
+    line_filter = st.session_state.get("line_filter")
+    if line_filter:
+        with st.container(horizontal=True, vertical_alignment="center"):
+            matching = sum(o.status.value == line_filter for o in review_outcomes)
+            st.caption(f":material/filter_alt: Showing the {matching} line(s) with status **{line_filter}**.",
+                       width="stretch")
+            st.button("Show all lines", icon=":material/filter_alt_off:", key="line_filter_clear",
+                      on_click=st.session_state.pop, args=("line_filter", None))
     for section, outcomes in groupby(review_outcomes, key=lambda o: o.check.section):
         outcomes = list(outcomes)
+        if line_filter:
+            outcomes_shown = [o for o in outcomes if o.status.value == line_filter]
+            if not outcomes_shown:
+                continue  # nothing with this status in this section
+        else:
+            outcomes_shown = outcomes
         present = sum(o.status is Status.PRESENT for o in outcomes)
         open_issues = sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in outcomes)
         done = sum(bool(o.validated_by) for o in outcomes)
@@ -1455,11 +1563,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         unread = [(document, record) for document, record in supporting_documents.values()
                   if record["check_id"] in section_ids and document.fingerprint not in in_this_run
                   and document.fingerprint not in section_reads.get(section, set())]
-        with st.expander(label, expanded=open_issues > 0 or bool(unread)):
+        with st.expander(label, expanded=bool(line_filter) or open_issues > 0 or bool(unread)):
             if unread:
                 with st.container(horizontal=True, vertical_alignment="center"):
                     st.caption(f":material/attach_file: New in this section: {', '.join(d.name for d, _ in unread)}. "
-                               f"Re-run it so Claude reads them with the other documents (roughly 10-15p).",
+                               "Re-run it so Clario reads them with the other documents.",
                                width="stretch")
                     if st.button("Re-run this section", icon=":material/refresh:", key=f"rerun_{section}"):
                         try:
@@ -1468,7 +1576,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                             st.error(f"Could not re-run the section: {error}", icon=":material/error:")
                         else:
                             st.rerun()
-            for o in outcomes:
+            for o in outcomes_shown:
                 render_line(o)
 
     changed = [line for line in lines if is_changed(line)]
@@ -1503,7 +1611,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
 
     with st.expander("Add a document", icon=":material/note_add:"):
         st.caption("Add a new or replacement document to the review's document store, and say which check it "
-                   "supports. To have Claude read it, re-run that section afterwards.")
+                   "supports. To have Clario read it, re-run that section afterwards.")
         added = st.file_uploader("Document", type=UPLOAD_TYPES, accept_multiple_files=True, key="add_document")
         supports = st.selectbox("Which check does it support?", review_outcomes,
                                 format_func=lambda o: f"{o.check.id} {o.check.check}", key="add_document_check")
@@ -1587,6 +1695,6 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
 
     navigation("Ongoing monitoring")
     st.caption(
-        "Items marked 🔎 must be reviewed by an analyst. Clario supports, and does not replace, a KYC review. "
-        "Not legal advice."
+        "AI findings are decision support: every line is validated by an analyst and every review is approved by "
+        "senior management."
     )

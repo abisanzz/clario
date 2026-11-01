@@ -122,7 +122,7 @@ def apply_overrides(assessment: PackAssessment, overrides: dict[str, Override]) 
                 changes.update(
                     status=override.status,
                     finding=override.note,
-                    decided_by=(f"Claude, from supporting document {override.via}, {override.reviewed_on}"
+                    decided_by=(f"Clario AI, from supporting document {override.via}, {override.reviewed_on}"
                                 if override.via else f"Analyst: {who}"),
                     before_review=f"{outcome.status.value} ({outcome.decided_by}): {outcome.finding}",
                 )

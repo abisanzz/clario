@@ -42,7 +42,7 @@ def test_files_claude_skipped_are_marked_other():
     reply = labels((1, "certificate_of_incorporation", "Certificate"))
     result = identify_documents(PACK, client=FakeClaude(reply))
     assert [label.document_type for label in result.labels] == ["certificate_of_incorporation", "other", "other"]
-    assert result.labels[1].reason == "Claude did not identify this file"
+    assert result.labels[1].reason == "Clario AI did not identify this file"
 
 
 def test_bad_file_numbers_and_duplicates_are_ignored():

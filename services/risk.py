@@ -189,7 +189,7 @@ def suggest_risk(documents: list[UploadedDocument], labels: list[DocumentLabel],
         factor = by_id.get(item.get("factor_id"))
         if factor and factor.id not in answered and item.get("rating") in RATINGS + [NOT_ENOUGH]:
             answered[factor.id] = FactorRating(factor, item["rating"], item.get("reasons", ""), quotes(item))
-    factors = [answered.get(f.id, FactorRating(f, NOT_ENOUGH, "Claude did not rate this factor; rate it manually"))
+    factors = [answered.get(f.id, FactorRating(f, NOT_ENOUGH, "Clario AI did not rate this factor; rate it manually"))
                for f in methodology.factors]
     trigger_by_id = {t.id: t for t in methodology.triggers}
     found, seen = [], set()
