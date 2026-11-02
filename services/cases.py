@@ -102,8 +102,10 @@ def remove_duplicates(folder: Path | None = None) -> list[str]:
 
 
 def find_by_review_id(text: str, folder: Path | None = None) -> str | None:
-    """The saved review with this ID (typed with or without CLR-, in any capitals), or None if there isn't one."""
+    """The saved review with this ID (typed with or without CLR-, in any capitals), or None if there isn't one.
+    A periodic review's ID (e.g. CLR-9580685D-PR1) finds the assessment it belongs to."""
     wanted = "".join(text.split()).upper().removeprefix(REVIEW_ID_PREFIX.upper()).removeprefix("CLR")
+    wanted = wanted.split("-PR")[0]
     for draft in list_cases(folder):
         if review_id(draft["id"]) == REVIEW_ID_PREFIX + wanted:
             return draft["id"]

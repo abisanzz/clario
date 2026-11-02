@@ -24,11 +24,14 @@ from services.companies_house import (  # noqa: E402
 )
 from services.extractor import ExtractionFailed  # noqa: E402
 from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
-from app.session import open_assessment  # noqa: E402
+from app.session import discard_unsaved, open_assessment, unsaved_summary  # noqa: E402
 from services.overview import summarise  # noqa: E402
 from services.cycles import (  # noqa: E402
+    approved_document,
     approved_snapshots,
+    attach_documents,
     carry_forward,
+    cycle_review_id,
     copy_file,
     current_cycle,
     cycle_key,
@@ -469,14 +472,66 @@ TAB_NAMES = ["Details & documents", "Document intelligence", "Risk assessment", 
 SCREENS = ["details", "documents", "assess", "results", "monitoring", "audit"]
 
 
+def leaving_with_unsaved(target: str) -> bool:
+    """Is the user leaving a tab that has checklist changes they have not saved?"""
+    here = st.session_state.get("current_tab")
+    return target != here and here in {c["tab"] for c in st.session_state.get("unsaved_lines", {}).values()}
+
+
 def go(to: str) -> None:
-    """Switch to another tab (applied before the tabs are drawn on the next run)."""
-    st.session_state.switch_tab = TAB_NAMES[SCREENS.index(to)]
+    """Switch to another tab (applied before the tabs are drawn on the next run). With unsaved checklist changes,
+    the user is asked first."""
+    target = TAB_NAMES[SCREENS.index(to)]
+    if leaving_with_unsaved(target):
+        st.session_state.leave_to = target
+    else:
+        st.session_state.switch_tab = target
     st.rerun()
 
 
+def tab_key() -> str:
+    """The tab bar's key. It changes when Clario puts the user back on a tab, so the browser redraws the tab bar:
+    a tab set straight back to the one it was on is otherwise not passed to the browser."""
+    return f"assessment_tab_{st.session_state.get('tab_version', 0)}"
+
+
 def remember_tab() -> None:
-    st.session_state.current_tab = st.session_state.assessment_tab
+    chosen = st.session_state[tab_key()]
+    if leaving_with_unsaved(chosen):  # stay on this tab until the user decides about the unsaved changes
+        st.session_state.leave_to = chosen
+        st.session_state.switch_tab = st.session_state.current_tab
+        st.session_state.tab_version = st.session_state.get("tab_version", 0) + 1
+    else:
+        st.session_state.current_tab = chosen
+
+
+@st.dialog("Document", icon=":material/description:", width="large")
+def view_document(name: str, data: bytes, media_type: str) -> None:
+    """Show a document's content: a PDF's pages, or the image itself."""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.markdown(f"**{name}**", width="stretch")
+        st.download_button("Download", data, file_name=name, mime=media_type, icon=":material/download:")
+    if media_type == "application/pdf":
+        st.pdf(data, height=720)
+    elif media_type.startswith("image/"):
+        st.image(data)
+    else:
+        st.info("This type of file can't be shown here. Download it to open it.", icon=":material/info:")
+
+
+@st.dialog("Unsaved changes", icon=":material/warning:", dismissible=False, width="medium")
+def unsaved_dialog(target: str) -> None:
+    st.warning("Some checklist changes have not been saved. Continuing without saving will lose them.",
+               icon=":material/warning:")
+    unsaved_summary()
+    stay, leave = st.columns(2)
+    if stay.button("Stay and save", type="primary", icon=":material/edit_note:", width="stretch"):
+        st.session_state.pop("leave_to", None)
+        st.rerun()
+    if leave.button("Leave without saving", icon=":material/logout:", width="stretch"):
+        discard_unsaved()
+        st.session_state.switch_tab = target
+        st.rerun()
 
 
 def make_tabs():
@@ -485,8 +540,8 @@ def make_tabs():
     if "switch_tab" in st.session_state:
         st.session_state.current_tab = st.session_state.pop("switch_tab")
     if st.session_state.get("current_tab") in TAB_NAMES:
-        st.session_state.assessment_tab = st.session_state.current_tab
-    return st.tabs(TAB_NAMES, key="assessment_tab", on_change=remember_tab)
+        st.session_state[tab_key()] = st.session_state.current_tab
+    return st.tabs(TAB_NAMES, key=tab_key(), on_change=remember_tab)
 
 
 if not saved:  # a new assessment: only the details tab can be used until it is saved
@@ -530,10 +585,6 @@ summary = [("Incorporated in", country), ("Company", company_link),
            ("Registration number", saved.get("registration_number", "")), ("FCA FRN", fca_frn), ("Website", website),
            ("Documents", f"{len(documents)} files")]
 st.caption(" · ".join(f"{label}: {value}" for label, value in summary if value))
-if st.session_state.get("case_id"):
-    st.caption(f":material/badge: Review ID **{review_id(st.session_state.case_id)}** · :material/cloud_done: All "
-               "changes saved")
-
 # Start again whenever the set of documents changes
 pack_key = pack_fingerprint(documents)
 # Line reviews, the risk decision and the final approval belong to the review, so adding documents keeps them
@@ -546,6 +597,17 @@ cycle_review_key = cycle_key(review_key, cycle)
 
 def cycle_name(number: int) -> str:
     return "Onboarding review" if number == 1 else f"Periodic review {number - 1}"
+
+
+if st.session_state.get("case_id"):
+    # Each review has its own ID; a periodic review's ID links it to the original, e.g. CLR-9580685D-PR1
+    linked = ""
+    if cycle > 1:
+        previous = load_snapshot(review_key, cycle - 1)
+        linked = (f" · {cycle_name(cycle)} of **{cycle_review_id(review_key, cycle - 1)}**"
+                  + (f", approved on {previous.approved_on}" if previous else ""))
+    st.caption(f":material/badge: Review ID **{cycle_review_id(review_key, cycle)}**{linked} · "
+               ":material/cloud_done: All changes saved")
 
 # --- The assessment's status, and putting it on hold, cancelling, resuming or reopening it ---
 STATUS_COLOURS = {NOT_STARTED: "gray", IN_PROGRESS: "blue", UNDER_REVIEW: "violet", PENDING_APPROVAL: "orange",
@@ -658,19 +720,20 @@ def delete_documents(chosen: list[tuple[UploadedDocument, dict | None]]) -> None
 
 with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)})", icon=":material/folder_open:"):
     rows = [(d, None) for d in original_documents] + list(stored_supporting)
-    table = pd.DataFrame([{
+    st.caption("Select a document to view it, or select documents to delete.")
+    picked_documents = st.dataframe(pd.DataFrame([{
         "File": document.name,
         "Your description": (record.get("description", "") if record else document.description) or "",
         "Supports": f"Check {record['check_id']}" if record else "Original document",
-        "Delete": False,
-    } for document, record in rows])
-    edited = st.data_editor(
-        table, hide_index=True, disabled=["File", "Your description", "Supports"],
-        key=f"documents_{pack_key}_{len(rows)}",
-        column_config={"Delete": st.column_config.CheckboxColumn(help="Tick, then click Delete selected")})
-    ticked = [rows[i] for i, row in edited.iterrows() if row["Delete"]]
-    if st.button("Delete selected", icon=":material/delete:", disabled=not ticked):
-        st.session_state.delete_pending = [document.fingerprint for document, _ in ticked]
+    } for document, record in rows]), hide_index=True, height="content", on_select="rerun",
+        selection_mode="multi-row", key=f"documents_{pack_key}_{len(rows)}")
+    ticked = [rows[i] for i in picked_documents.selection.rows]
+    with st.container(horizontal=True):
+        if st.button("View", icon=":material/visibility:", type="primary", disabled=len(ticked) != 1,
+                     help="Select one document to view its content."):
+            view_document(ticked[0][0].name, ticked[0][0].data, ticked[0][0].media_type)
+        if st.button("Delete selected", icon=":material/delete:", disabled=not ticked):
+            st.session_state.delete_pending = [document.fingerprint for document, _ in ticked]
     pending = [(d, r) for d, r in rows if d.fingerprint in st.session_state.get("delete_pending", [])]
     if pending:
         deletable = [(d, r) for d, r in pending if r or source != "Sample pack"]
@@ -713,6 +776,8 @@ def remember(**choices) -> None:
 
 
 tabs = make_tabs()
+if st.session_state.get("leave_to"):
+    unsaved_dialog(st.session_state.leave_to)
 open_index = next((i for i, tab in enumerate(tabs) if tab.open), 0)
 screen, open_tab = SCREENS[open_index], tabs[open_index]
 
@@ -840,31 +905,36 @@ if screen == "documents":
                            "a file's **Details** to see why Clario AI chose its type.")
                 comments_before = st.session_state.get("label_comments", {})
                 claude_types = {label.name: label.document_type for label in identification.labels}
-                widths = [3, 3, 4]
-                header = st.columns(widths)
-                for column, title in zip(header, ["Document type", "File", "Comments"]):
-                    column.markdown(f"**{title}**")
                 confirmed, comments = [], {}
                 for number, label in enumerate(shown):
-                    type_side, file_side, comment_side = st.columns(widths, vertical_alignment="center")
-                    file_side.markdown(label.name)
-                    chosen_type = type_side.selectbox(
-                        f"Document type of {label.name}", list(DOCUMENT_TYPES.values()),
-                        index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
-                        label_visibility="collapsed")
-                    type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
-                    comment = comment_side.text_input(
-                        f"Comments on {label.name}", value=comments_before.get(label.name, ""),
-                        key=f"label_comment_{pack_key}_{number}", label_visibility="collapsed",
-                        placeholder="Required: why did you change the document type?" if type_changed else "Comments")
-                    with st.expander("Details"):
-                        st.markdown(f"**Why Clario AI chose this type:** {product_voice(label.reason) or 'No reason given.'}")
-                        st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
-                        found = identification.details.get(label.name)
-                        if found and not found.empty:
-                            st.markdown("**What it shows:**\n" + "\n".join(f"- {line}" for line in detail_lines(found)))
-                        elif identification.extracted:
-                            st.caption("No company details were found in this document.")
+                    # One card per document: its type, comments and details together
+                    with st.container(border=True):
+                        with st.container(horizontal=True, vertical_alignment="center"):
+                            st.markdown(f":material/description: **{label.name}**", width="stretch")
+                            shown_file = next((d for d in documents if d.name == label.name), None)
+                            if shown_file and st.button("View", icon=":material/visibility:",
+                                                        key=f"view_doc_{pack_key}_{number}"):
+                                view_document(shown_file.name, shown_file.data, shown_file.media_type)
+                        type_side, comment_side = st.columns([2, 3])
+                        chosen_type = type_side.selectbox(
+                            "Document type", list(DOCUMENT_TYPES.values()),
+                            index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}")
+                        type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
+                        comment = comment_side.text_input(
+                            "Comments (required: you changed the type)" if type_changed else "Comments",
+                            value=comments_before.get(label.name, ""), key=f"label_comment_{pack_key}_{number}",
+                            placeholder="Why did you change the document type?" if type_changed
+                            else "Optional comments on this document")
+                        with st.expander(f"Details for {label.name}", icon=":material/info:"):
+                            st.markdown(f"**Why Clario AI chose this type:** "
+                                        f"{product_voice(label.reason) or 'No reason given.'}")
+                            st.markdown(f"**Your description:** {description_of.get(label.name) or 'None given'}")
+                            found = identification.details.get(label.name)
+                            if found and not found.empty:
+                                st.markdown("**What it shows:**\n" + "\n".join(f"- {line}"
+                                                                                for line in detail_lines(found)))
+                            elif identification.extracted:
+                                st.caption("No company details were found in this document.")
                     confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
                     if comment.strip():
                         comments[label.name] = comment.strip()
@@ -896,6 +966,36 @@ if screen == "documents":
         st.caption("Next: Clario suggests the industry and an initial risk rating.")
         st.stop()
 
+class NotSavedYet(Exception):
+    """A step that has no saved answer to replay."""
+
+
+class ReplayOnly:
+    """Stands in for the AI service when reopening a saved assessment: saved answers replay for free, and a step
+    with no saved answer stops here instead of calling the paid service."""
+
+    class _Messages:
+        def create(self, **_):
+            raise NotSavedYet
+
+    beta = type("Beta", (), {"messages": _Messages()})()
+
+
+def replay_only(step):
+    try:
+        return step()
+    except NotSavedYet:
+        return None
+
+
+# After a refresh, a later tab reloads the earlier tabs' results from their saved answers (free), so it opens directly
+LATER_SCREENS = ("assess", "results", "monitoring")
+if screen in LATER_SCREENS and "identification" not in st.session_state and st.session_state.get("labels"):
+    restored = replay_only(lambda: identify_documents(documents, saved_answer=saved_answers.get("labels"),
+                                                      client=ReplayOnly()))
+    if restored:
+        st.session_state.identification = restored
+
 confirmed = st.session_state.get("labels") or []
 identification = st.session_state.get("identification")
 if not confirmed or identification is None:
@@ -923,6 +1023,12 @@ links_key = (tuple(confirmed), company_link.strip(), website.strip(), fca_frn.st
 if st.session_state.get("industry") and st.session_state.industry[0] != links_key:
     st.session_state.pop("industry")  # documents, labels or links changed
     st.session_state.pop("choice", None)
+if screen in ("results", "monitoring") and "industry" not in st.session_state and st.session_state.get("choice"):
+    restored_sources, _ = fetch_links(company_link, website, fca_frn)
+    restored = replay_only(lambda: suggest_industry(documents, confirmed, restored_sources,
+                                                    saved_answer=saved_answers.get("industry"), client=ReplayOnly()))
+    if restored:
+        st.session_state.industry = (links_key, restored)
 
 if screen == "assess":
     with tabs[2]:
@@ -1159,11 +1265,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     approval_path = case_file(cycle_review_key, "final-approval")
     approval = load_approval(approval_path)
 
-    # Step 4 reviews sections 1 to 6. Section 7 (risk rating and escalation) is covered by step 3, the final approval
-    # and the audit log, so it is not shown. Section 8 (ongoing monitoring) comes after the final approval.
+    # Evidence review covers sections 1 to 6. Section 7 (risk rating and escalation) is covered by the risk assessment,
+    # the final approval and the audit log. Section 8 (monitoring set-up: review date, early-review triggers, record
+    # keeping) is firm policy outside Clario; Clario sets the next review date itself when a review is approved.
     RISK_SECTION, ONGOING_SECTION = "7.", "8."
     review_outcomes = [o for o in result.outcomes if not o.check.section.startswith((RISK_SECTION, ONGOING_SECTION))]
-    ongoing_outcomes = [o for o in result.outcomes if o.check.section.startswith(ONGOING_SECTION)]
     review_ids = {o.check.id for o in review_outcomes}
     submission = load_submission(review_key, cycle)
 
@@ -1173,32 +1279,80 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 + [{"name": r["name"], "description": r.get("description", ""), "supports": f"Check {r['check_id']}"}
                    for _, r in stored_supporting])
 
+    def document_files() -> dict[str, UploadedDocument]:
+        """Every document in the review, original and supporting, by name."""
+        return {d.name: d for d in original_documents} | {d.name: d for d, _ in stored_supporting}
+
     def freeze_now(given: "FinalApproval"):
-        """Freeze the checklist as it stands, at approval."""
+        """Freeze the checklist as it stands, at approval, with a copy of every document used."""
         return freeze(review_key, cycle, result, given.approver, given.approved_on, given.note, industry, checklist,
-                      asdict(decision), document_list())
+                      asdict(decision), document_list(), files=document_files())
 
     snapshot = load_snapshot(review_key, cycle) if approval else None
     if approval and not snapshot:  # approved before checklists were frozen: freeze it as it stands now
         snapshot = freeze_now(approval)
     history = approved_snapshots(review_key)  # every approved cycle, most recent first
 
+    def frozen_line(line) -> None:
+        status = Status(line.status)
+        if line.before_review:  # the analyst (or a supporting document) changed Clario AI's answer
+            original, _, found = line.before_review.partition("): ")
+            original_status = original.split(" (")[0]
+            changed = f"Status changed from {original_status} to {status.value} ({product_voice(line.decided_by)})"
+        else:
+            found, changed = line.finding, ""
+        with st.container(border=True):
+            text_side, status_side = st.columns([5, 2], vertical_alignment="center")
+            text_side.markdown(f"**{line.id}** {line.check}")
+            status_side.markdown(f"**{STATUS_TEXT[status]}**")
+            st.caption(f":material/verified: Validated by {line.validated_by}" if line.validated_by
+                       else ":material/remove_done: Not validated")
+            clario_side, analyst_side = st.columns(2)
+            with clario_side.container(border=True, height="stretch"):
+                st.markdown("**:material/smart_toy: Clario AI found**")
+                st.markdown(product_voice(found) or "_Nothing recorded._")
+                if changed:
+                    st.caption(f":material/edit: {changed}")
+            with analyst_side.container(border=True, height="stretch"):
+                st.markdown("**:material/person: Analyst comment**")
+                st.markdown(line.comment or "_No comment._")
+            if line.evidence:
+                with st.expander(f"Evidence ({len(line.evidence)})", icon=":material/format_quote:"):
+                    st.markdown("\n".join(f"- {quote}" for quote in line.evidence))
+
     def show_frozen(frozen, key: str) -> None:
-        """A checklist exactly as it was approved: read-only."""
+        """A checklist exactly as it was approved, read-only: for each line, what Clario AI found and wrote at the
+        time, and the analyst's comment."""
         lines_shown = [line for line in frozen.lines if not line.section.startswith((RISK_SECTION, ONGOING_SECTION))]
         for section, section_lines in groupby(lines_shown, key=lambda line: line.section):
             section_lines = list(section_lines)
             present = sum(line.status == Status.PRESENT.value for line in section_lines)
             with st.expander(f"{section} · {present} of {len(section_lines)} present"):
-                st.dataframe(pd.DataFrame([{
-                    "Line": line.id, "Check": line.check, "Status": STATUS_TEXT[Status(line.status)],
-                    "Validated by": line.validated_by, "Comment": line.comment, "Finding": line.finding,
-                } for line in section_lines]), hide_index=True, height="content", key=f"frozen_{key}_{section}",
-                    column_config={"Check": st.column_config.TextColumn(width="large"),
-                                   "Finding": st.column_config.TextColumn(width="large")})
+                for line in section_lines:
+                    frozen_line(line)
+
         if frozen.documents:
-            st.caption(":material/folder_open: Documents at approval: "
-                       + ", ".join(d["name"] for d in frozen.documents))
+            if not all(d.get("sha256") for d in frozen.documents):  # approved before copies were kept
+                frozen = attach_documents(review_key, frozen.cycle, document_files()) or frozen
+            with st.expander(f"Documents at approval ({len(frozen.documents)})", icon=":material/folder_open:"):
+                st.caption("Each document exactly as it was when the review was approved. Later uploads or deletions "
+                           "do not change these copies.")
+                for number, document in enumerate(frozen.documents):
+                    data = approved_document(review_key, frozen.cycle, document.get("sha256", ""))
+                    name_side, view_side, button_side = st.columns([5, 1, 1], vertical_alignment="center")
+                    name_side.markdown(f":material/description: **{document['name']}**  \n"
+                                       + " · ".join(filter(None, [document.get("supports"),
+                                                                  document.get("description")])))
+                    if data:
+                        if view_side.button("View", icon=":material/visibility:", key=f"view_approved_{key}_{number}",
+                                            width="stretch"):
+                            view_document(document["name"], data, document.get("media_type", "application/pdf"))
+                        button_side.download_button(
+                            "Download", data, file_name=document["name"], key=f"approved_doc_{key}_{number}",
+                            mime=document.get("media_type", "application/pdf"), icon=":material/download:",
+                            width="stretch")
+                    else:
+                        button_side.caption("No copy kept")
 
     def withdraw(who: str) -> None:
         withdraw_approval(approval_path)
@@ -1212,7 +1366,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             with st.container():
                 st.caption("Checklist")
                 st.markdown(f"#### {CHECKLISTS[checklist][0]}")
-                st.caption(f"{cycle_name(cycle)} · Industry: {INDUSTRIES[industry]}")
+                st.caption(f"{cycle_review_id(review_key, cycle)} · {cycle_name(cycle)} · Industry: "
+                           f"{INDUSTRIES[industry]}")
             with st.container():
                 st.caption("Final approval")
                 st.markdown("#### :green[Approved]")
@@ -1259,6 +1414,27 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 st.markdown(f"**:material/autorenew: {cycle_name(cycle)}** started from the checklist approved on "
                             f"{history[0].approved_on} by {history[0].approved_by}. Each line keeps its approved status "
                             "and comment; validate every line again, then submit for approval.")
+        # --- What to chase: requests to the client and checks on public registers ---
+
+        left, right = st.columns(2)
+        for column, title, gaps, empty, to_do in [
+            (left, "Request from client", result.request_from_client(), "Nothing to request.", "to request"),
+            (right, "Check on public registers", result.check_on_registers(), "Nothing to check.", "to check"),
+        ]:
+            # One box each: an action-required badge and title, with the items in a fold-out inside
+            items = f"{len(gaps)} item{'s' if len(gaps) != 1 else ''}"
+            with column.container(border=True):
+                if gaps:
+                    st.badge("Action required", icon=":material/priority_high:", color="orange")
+                    st.markdown(f"**{title}** · {items} {to_do}")
+                    with st.expander(f"Show the {items}", icon=":material/list:"):
+                        for outcome in gaps:
+                            st.markdown(f"**{outcome.check.id} · {outcome.check.evidence_source}**  \n"
+                                        f"{outcome.finding}")
+                else:
+                    st.badge("Complete", icon=":material/check:", color="green")
+                    st.markdown(f"**{title}** · {empty}")
+
         # Status tiles: click View to show only the lines with that status
         line_filter = st.session_state.get("line_filter")
         with st.container(horizontal=True, wrap=True):
@@ -1278,24 +1454,6 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     st.button("Showing" if showing else "View", key=f"line_filter_{status.name}", type="tertiary",
                               icon=":material/check:" if showing else ":material/arrow_forward:", disabled=showing,
                               on_click=st.session_state.update, kwargs={"line_filter": status.value})
-
-        left, right = st.columns(2)
-        for column, title, gaps, empty, to_do in [
-            (left, "Request from client", result.request_from_client(), "Nothing to request.", "to request"),
-            (right, "Check on public registers", result.check_on_registers(), "Nothing to check.", "to check"),
-        ]:
-            # A clear signal above each section: action required while anything is outstanding
-            if gaps:
-                column.badge("Action required", icon=":material/priority_high:", color="orange")
-                label = f"**{title}** · {len(gaps)} item{'s' if len(gaps) > 1 else ''} {to_do}"
-            else:
-                column.badge("Complete", icon=":material/check:", color="green")
-                label = f"**{title}** · Nothing outstanding"
-            with column.expander(label, icon=":material/warning:" if gaps else ":material/check_circle:"):
-                if not gaps:
-                    st.success(empty, icon=":material/check_circle:")
-                for outcome in gaps:
-                    st.markdown(f"**{outcome.check.id} · {outcome.check.evidence_source}**  \n{outcome.finding}")
 
         # --- Every check, validated line by line ---
 
@@ -1350,9 +1508,18 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                   "Re-ran the section with " + ", ".join(d.name for d in extra_docs), section)
 
 
-    reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""), width=300,
-                             help="Your name, recorded against every line you validate or change.")
+    if screen == "results":  # the checklist is only on Evidence review
+        reviewer = st.text_input("Reviewer", value=st.session_state.get("last_reviewer", ""), width=300,
+                                 help="Your name, recorded against every line you validate or change.")
+    else:
+        reviewer = st.session_state.get("last_reviewer", "")
     line_versions = st.session_state.setdefault("line_versions", {})  # a line's fields start fresh after it is saved
+    unsaved_lines = st.session_state.setdefault("unsaved_lines", {})  # changes not saved yet, by check ID
+    section_open = st.session_state.setdefault("section_open", {})  # which checklist sections the user opened
+
+
+    def remember_section(section_key: str) -> None:
+        section_open[section_key] = st.session_state[section_key]
 
 
     def is_changed(line) -> bool:
@@ -1420,17 +1587,29 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     def render_line(o) -> None:
         """One checklist line: status, tick, comment and Save, with Details and a supporting document."""
         key = f"{review_path.stem}_{o.check.id}_{line_versions.get(o.check.id, 0)}"
+        widgets = {"status": f"status_{key}", "validated": f"validated_{key}", "comment": f"comment_{key}"}
+        pending = unsaved_lines.get(o.check.id)
+        if pending and set(pending["values"]) == set(widgets.values()):
+            for widget, value in pending["values"].items():
+                st.session_state.setdefault(widget, value)  # an unsaved change made before the line was hidden
+
+        def starting(widget: str, value) -> dict:
+            """The saved value, unless the field already holds one (then Streamlit keeps that)."""
+            return {} if widgets[widget] in st.session_state else value
+
         with st.container(border=True):
             text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
             text_side.markdown(f"**{o.check.id}** {o.check.check}")
             status = STATUS_FROM_TEXT[status_side.selectbox(
-                "Status", list(STATUS_TEXT.values()), index=list(STATUS_TEXT).index(o.status),
-                key=f"status_{key}", label_visibility="collapsed")]
-            validated = tick_side.checkbox("Validated", value=bool(o.validated_by), key=f"validated_{key}")
+                "Status", list(STATUS_TEXT.values()), key=widgets["status"], label_visibility="collapsed",
+                **starting("status", {"index": list(STATUS_TEXT).index(o.status)}))]
+            validated = tick_side.checkbox("Validated", key=widgets["validated"],
+                                           **starting("validated", {"value": bool(o.validated_by)}))
             comment_side, line_save_side = st.columns([6, 1], vertical_alignment="center")
             comment = comment_side.text_input(
-                "Comment", value=o.reviewer_note, key=f"comment_{key}", label_visibility="collapsed",
-                placeholder="Comment (required if you change the status)")
+                "Comment", key=widgets["comment"], label_visibility="collapsed",
+                placeholder="Comment (required if you change the status)",
+                **starting("comment", {"value": o.reviewer_note}))
             with st.expander("Details"):
                 st.markdown(f"**Finding:** {o.finding}")
                 if o.claude_finding:
@@ -1464,6 +1643,21 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                         disabled=not uploads, help="Add the document and save this line.")
             line = (o, status, validated, comment or "", uploads or [], description or "")
             lines.append(line)
+            if is_changed(line):
+                what = [f"status changed to {status.value}"] if status is not o.status else []
+                if validated != bool(o.validated_by):
+                    what.append("Validated ticked" if validated else "Validated unticked")
+                if (comment or "") != o.reviewer_note:
+                    what.append("comment edited")
+                if uploads:
+                    what.append("document attached (add it again if you leave)")
+                unsaved_lines[o.check.id] = {
+                    "tab": TAB_NAMES[SCREENS.index(screen)], "section": o.check.section,
+                    "line": f"{o.check.id} {o.check.check}", "what": ", ".join(what),
+                    "values": {widgets["status"]: STATUS_TEXT[status], widgets["validated"]: validated,
+                               widgets["comment"]: comment or ""}}
+            else:
+                unsaved_lines.pop(o.check.id, None)
             line_save = line_save_side.button("Save", icon=":material/save:", key=f"save_{key}",
                                               disabled=not is_changed(line), help="Save this line now.",
                                               width="stretch")
@@ -1480,8 +1674,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     if screen == "monitoring":
         st.header("Ongoing monitoring")
         if not history:
-            st.info("Opens once the review is approved: the next review date, the ongoing monitoring "
-                    "checks (checklist section 8), periodic reviews and the review history.", icon=":material/info:")
+            st.info("Opens once the review is approved: the next review date, periodic reviews and the review "
+                    "history.", icon=":material/info:")
             if st.button("Go to Evidence review", icon=":material/arrow_back:"):
                 go("results")
             st.stop()
@@ -1521,17 +1715,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     go("results")
 
         with st.container(border=True):
-            st.subheader(":material/event_repeat: Ongoing monitoring checks (section 8)")
-            st.caption("Record keeping, the triggers for an early review, and screening between reviews.")
-            for o in ongoing_outcomes:
-                render_line(o)
-
-        with st.container(border=True):
             st.subheader(":material/history: Review history")
             st.caption("Each approved review, frozen as it stood at approval.")
             for past in history:
-                with st.expander(f"{cycle_name(past.cycle)} · approved on {past.approved_on} by {past.approved_by} · "
-                                 f"{past.risk.get('rating', '')} risk"):
+                with st.expander(f"{cycle_review_id(review_key, past.cycle)} · {cycle_name(past.cycle)} · approved "
+                                 f"on {past.approved_on} by {past.approved_by} · {past.risk.get('rating', '')} risk"):
                     if past.note:
                         st.caption(f"Approval note: {past.note}")
                     show_frozen(past, f"history_{past.cycle}")
@@ -1563,7 +1751,12 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         unread = [(document, record) for document, record in supporting_documents.values()
                   if record["check_id"] in section_ids and document.fingerprint not in in_this_run
                   and document.fingerprint not in section_reads.get(section, set())]
-        with st.expander(label, expanded=bool(line_filter) or open_issues > 0 or bool(unread)):
+        # Each section stays open or closed as the user left it, even when saving changes the counts in its title
+        # (which makes Streamlit draw it afresh). While a status filter is on, matching sections open.
+        section_key = f"section_{review_path.stem}_{section}_{line_filter or 'all'}"
+        starts_open = bool(line_filter) or open_issues > 0 or bool(unread)
+        with st.expander(label, expanded=section_open.get(section_key, starts_open), key=section_key,
+                         on_change=remember_section, args=(section_key,)):
             if unread:
                 with st.container(horizontal=True, vertical_alignment="center"):
                     st.caption(f":material/attach_file: New in this section: {', '.join(d.name for d, _ in unread)}. "
@@ -1656,42 +1849,42 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     st.rerun()
             if not reviewer.strip() and not outstanding:
                 st.caption("Give your name in **Reviewer** at the top of the checklist to submit.")
+            st.caption(":material/info: Final approval opens once the review is submitted.")
 
-    with st.container(border=True):
-        st.subheader(":material/verified: Final approval")
-        st.caption("Every review needs senior management approval before the client is onboarded. Approving freezes "
-                   "the checklist as it stands.")
-        if not submission:
-            st.caption(":material/info: Approval opens once the review is submitted. You can still reject it.")
-        with st.form("final_approval"):
-            approver = st.text_input("Senior manager")
-            approval_note = st.text_area("Note (required to reject)", height=80,
-                                         placeholder="e.g. Approved subject to source of wealth evidence")
-            with st.container(horizontal=True):
-                approve = st.form_submit_button("Approve review", type="primary", icon=":material/verified:",
-                                                disabled=bool(outstanding) or not submission)
-                reject = st.form_submit_button("Reject review", icon=":material/block:",
-                                               help="Formally reject the assessment; the note is the reason.")
-            if approve:
-                try:
-                    given = approve_review(approval_path, approver, approval_note, outstanding=outstanding)
-                except ValueError as error:
-                    st.error(str(error), icon=":material/error:")
-                else:
-                    freeze_now(given)
-                    log_event(audit_path, approver, f"Approved the {cycle_name(cycle).lower()}; checklist frozen"
-                              + (f": {approval_note.strip()}" if approval_note.strip() else ""))
-                    st.rerun()
-            if reject:
-                try:
-                    set_status(status_path, REJECTED, approval_note, approver)
-                except ValueError as error:
-                    st.error(str(error).replace("Give your name", "Give the senior manager's name"),
-                             icon=":material/error:")
-                else:
-                    withdraw_submission(review_key, cycle)
-                    log_event(audit_path, approver, f"Rejected the review: {approval_note.strip()}")
-                    st.rerun()
+    if submission:  # final approval appears once the review has been submitted
+        with st.container(border=True):
+            st.subheader(":material/verified: Final approval")
+            st.caption("Every review needs senior management approval before the client is onboarded. Approving freezes "
+                       "the checklist as it stands.")
+            with st.form("final_approval"):
+                approver = st.text_input("Senior manager")
+                approval_note = st.text_area("Note (required to reject)", height=80,
+                                             placeholder="e.g. Approved subject to source of wealth evidence")
+                with st.container(horizontal=True):
+                    approve = st.form_submit_button("Approve review", type="primary", icon=":material/verified:",
+                                                    disabled=bool(outstanding) or not submission)
+                    reject = st.form_submit_button("Reject review", icon=":material/block:",
+                                                   help="Formally reject the assessment; the note is the reason.")
+                if approve:
+                    try:
+                        given = approve_review(approval_path, approver, approval_note, outstanding=outstanding)
+                    except ValueError as error:
+                        st.error(str(error), icon=":material/error:")
+                    else:
+                        freeze_now(given)
+                        log_event(audit_path, approver, f"Approved the {cycle_name(cycle).lower()}; checklist frozen"
+                                  + (f": {approval_note.strip()}" if approval_note.strip() else ""))
+                        st.rerun()
+                if reject:
+                    try:
+                        set_status(status_path, REJECTED, approval_note, approver)
+                    except ValueError as error:
+                        st.error(str(error).replace("Give your name", "Give the senior manager's name"),
+                                 icon=":material/error:")
+                    else:
+                        withdraw_submission(review_key, cycle)
+                        log_event(audit_path, approver, f"Rejected the review: {approval_note.strip()}")
+                        st.rerun()
 
     navigation("Ongoing monitoring")
     st.caption(

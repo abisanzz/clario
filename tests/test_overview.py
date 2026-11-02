@@ -115,3 +115,12 @@ def test_rejected_cancelled_and_approved_assessments_are_not_active(folders):
     for status in (REJECTED, CANCELLED):
         set_status(case_file(case_id, "status"), status, "Reason", "Abi San")
         assert not all_assessments(folders)[0].active
+
+
+def test_last_activity_is_the_newest_change(folders):
+    from services.audit import log_event
+    case_id = make_case(folders, rated=False)
+    saved = all_assessments(folders)[0].last_activity
+    assert saved  # before anything is logged: when it was saved
+    log_event(case_file(case_id, "audit").with_suffix(".jsonl"), "Abi San", "Validated a line")
+    assert all_assessments(folders)[0].last_activity >= saved

@@ -16,7 +16,7 @@ ASSESSMENTS_PAGE = "app_pages/assessments.py"
 WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "registration_", "stated_industry_",
                    "owner", "source")
 REVIEW_STATE = ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key", "risk",
-                "section_reads", "line_versions", "delete_pending", "line_filter")
+                "section_reads", "line_versions", "delete_pending", "line_filter", "unsaved_lines", "leave_to")
 
 
 def start_over(entity: dict, case_id: str | None) -> None:
@@ -44,3 +44,25 @@ def open_assessment(case_id: str) -> None:
 
 def new_assessment() -> None:
     start_over({}, None)
+
+
+# --- Checklist changes that have not been saved yet ---
+
+
+def unsaved_summary() -> None:
+    """What has not been saved, grouped by checklist section: each line and what changed on it."""
+    by_section: dict[str, list[dict]] = {}
+    for change in st.session_state.get("unsaved_lines", {}).values():
+        by_section.setdefault(change["section"], []).append(change)
+    for section, changes in sorted(by_section.items()):
+        st.markdown(f"**{section}**\n" + "\n".join(f"- {c['line']}: {c['what']}" for c in changes))
+
+
+def discard_unsaved() -> None:
+    """Forget the unsaved changes: each line shows its saved status, tick and comment again."""
+    versions = st.session_state.setdefault("line_versions", {})
+    for check_id, change in st.session_state.pop("unsaved_lines", {}).items():
+        for widget in change["values"]:
+            st.session_state.pop(widget, None)
+        versions[check_id] = versions.get(check_id, 0) + 1  # fresh fields with the saved values
+    st.session_state.pop("leave_to", None)

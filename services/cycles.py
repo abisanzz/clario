@@ -7,13 +7,14 @@ for approval again. Files live in the review's folder in the git-ignored cases f
 """
 
 import json
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from services.cases import CASES_DIR
+from services.cases import CASES_DIR, review_id
 from services.checklist import Check
-from services.pack import CheckOutcome, PackAssessment
+from services.pack import CheckOutcome, PackAssessment, UploadedDocument
 from services.reviews import save_override
 from services.validator import Status
 
@@ -30,6 +31,12 @@ def current_cycle(case_id: str, folder: Path | None = None) -> int:
 def cycle_key(case_id: str, cycle: int) -> str:
     """The key the cycle's review files are saved under. Cycle 1 keeps the review's own id."""
     return case_id if cycle == 1 else f"{case_id}-cycle-{cycle}"
+
+
+def cycle_review_id(case_id: str, cycle: int) -> str:
+    """Each review cycle's own ID, linked to the original: CLR-9580685D, then CLR-9580685D-PR1 for periodic review 1."""
+    original = review_id(case_id)
+    return original if cycle == 1 else f"{original}-PR{cycle - 1}"
 
 
 def start_periodic_review(case_id: str, folder: Path | None = None, today: date | None = None) -> int:
@@ -113,9 +120,51 @@ def snapshot_path(case_id: str, cycle: int, folder: Path | None = None) -> Path:
     return _folder(case_id, folder) / f"approved-cycle-{cycle}.json"
 
 
+def snapshot_documents_dir(case_id: str, cycle: int, folder: Path | None = None) -> Path:
+    """Where the documents used at approval are kept: copies that later uploads or deletions never touch."""
+    return _folder(case_id, folder) / f"approved-cycle-{cycle}-documents"
+
+
+def keep_documents(case_id: str, cycle: int, documents: list[dict], files: dict[str, UploadedDocument],
+                   folder: Path | None = None) -> list[dict]:
+    """Keep a copy of each document (matched by name) with the approved record. Returns the document records with
+    each copy's sha256 and media type."""
+    store = snapshot_documents_dir(case_id, cycle, folder)
+    store.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for document in documents:
+        file = files.get(document["name"])
+        if file and not document.get("sha256"):
+            (store / file.fingerprint).write_bytes(file.data)
+            document = {**document, "sha256": file.fingerprint, "media_type": file.media_type}
+        kept.append(document)
+    return kept
+
+
+def approved_document(case_id: str, cycle: int, sha256: str, folder: Path | None = None) -> bytes | None:
+    """A document as it was at approval, or None if no copy was kept."""
+    path = snapshot_documents_dir(case_id, cycle, folder) / sha256
+    return path.read_bytes() if sha256 and path.exists() else None
+
+
+def attach_documents(case_id: str, cycle: int, files: dict[str, UploadedDocument],
+                     folder: Path | None = None) -> Snapshot | None:
+    """For a record approved before documents were kept: keep copies of the ones still on file (matched by name)."""
+    snapshot = load_snapshot(case_id, cycle, folder)
+    if not snapshot or all(d.get("sha256") for d in snapshot.documents):
+        return snapshot
+    path = snapshot_path(case_id, cycle, folder)
+    record = json.loads(path.read_text())
+    record["documents"] = keep_documents(case_id, cycle, record["documents"], files, folder)
+    path.write_text(json.dumps(record, indent=2))
+    return load_snapshot(case_id, cycle, folder)
+
+
 def freeze(case_id: str, cycle: int, assessment: PackAssessment, approved_by: str, approved_on: str, note: str,
-           industry: str, checklist: str, risk: dict, documents: list[dict], folder: Path | None = None) -> Snapshot:
-    """Freeze the checklist as it stands at approval."""
+           industry: str, checklist: str, risk: dict, documents: list[dict], folder: Path | None = None,
+           files: dict[str, UploadedDocument] | None = None) -> Snapshot:
+    """Freeze the checklist as it stands at approval, with a copy of each document used (files, by name)."""
+    documents = keep_documents(case_id, cycle, documents, files or {}, folder)
     lines = [FrozenLine(o.check.id, o.check.section, o.check.check, o.check.evidence_source, o.check.evidence_type,
                         o.status.value, o.finding, list(o.evidence), o.decided_by, o.claude_finding, o.before_review,
                         o.validated_by, o.reviewer_note) for o in assessment.outcomes]
@@ -137,8 +186,9 @@ def load_snapshot(case_id: str, cycle: int, folder: Path | None = None) -> Snaps
 
 
 def remove_snapshot(case_id: str, cycle: int, folder: Path | None = None) -> None:
-    """Used when an approval is withdrawn: the checklist is no longer frozen."""
+    """Used when an approval is withdrawn: the checklist is no longer frozen, and its kept documents go too."""
     snapshot_path(case_id, cycle, folder).unlink(missing_ok=True)
+    shutil.rmtree(snapshot_documents_dir(case_id, cycle, folder), ignore_errors=True)
 
 
 def approved_snapshots(case_id: str, folder: Path | None = None) -> list[Snapshot]:

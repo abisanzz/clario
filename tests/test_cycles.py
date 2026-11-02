@@ -11,6 +11,7 @@ from services.cycles import (
     copy_file,
     current_cycle,
     cycle_key,
+    cycle_review_id,
     freeze,
     load_snapshot,
     load_submission,
@@ -19,7 +20,7 @@ from services.cycles import (
     submit_for_approval,
     withdraw_submission,
 )
-from services.overview import all_assessments
+from services.overview import all_assessments, earlier_approved_reviews
 from services.pack import CheckOutcome, PackAssessment, UploadedDocument
 from services.reviews import apply_overrides, approve_review, case_file, load_overrides, save_line_reviews
 from services.risk import save_risk_decision
@@ -105,3 +106,31 @@ def test_the_dashboard_follows_the_periodic_review(folders):
     copy_file(case_file(case_id, "risk-decision"), case_file(cycle_key(case_id, cycle), "risk-decision"))
     summary = all_assessments(folders)[0]
     assert (summary.cycle, summary.status, summary.next_review) == (2, UNDER_REVIEW, "2027-11-01")
+    # The periodic review has its own ID, linked to the original
+    from services.cases import find_by_review_id, review_id
+    assert summary.original_review_id == review_id(case_id)
+    assert summary.review_id == cycle_review_id(case_id, 2) == review_id(case_id) + "-PR1"
+    assert find_by_review_id(summary.review_id, folders) == find_by_review_id(review_id(case_id), folders) == case_id
+    # The approved onboarding review is still listed in its own right, e.g. when filtering for Approved
+    [earlier] = earlier_approved_reviews(folders)
+    assert (earlier.review_id, earlier.status, earlier.approved_by, earlier.followed_by) == (
+        review_id(case_id), "Approved", "C. Head", summary.review_id)
+    assert earlier.next_action == f"Followed by {summary.review_id}" and not earlier.active
+
+
+def test_approval_keeps_a_copy_of_each_document(folders):
+    from services.cycles import approved_document, attach_documents, snapshot_documents_dir
+    bill = UploadedDocument("bill.pdf", b"%PDF electricity bill")
+    snapshot = freeze("case", 1, checks_found(), "C. Head", "2026-11-01", "", "payments", "fintech_high",
+                      {"rating": "High"}, [{"name": "bill.pdf", "supports": "Original document"}], folders,
+                      files={"bill.pdf": bill})
+    [kept] = snapshot.documents
+    assert approved_document("case", 1, kept["sha256"], folders) == bill.data  # whatever happens to the original
+    # A record approved before copies were kept gets them attached, matched by name
+    freeze("old", 1, checks_found(), "C. Head", "2026-10-01", "", "payments", "fintech_high", {"rating": "High"},
+           [{"name": "bill.pdf"}], folders)
+    assert "sha256" not in load_snapshot("old", 1, folders).documents[0]
+    attached = attach_documents("old", 1, {"bill.pdf": bill}, folders)
+    assert approved_document("old", 1, attached.documents[0]["sha256"], folders) == bill.data
+    remove_snapshot("case", 1, folders)  # withdrawing approval removes the copies too
+    assert not snapshot_documents_dir("case", 1, folders).exists()

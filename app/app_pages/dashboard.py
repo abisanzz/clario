@@ -20,6 +20,7 @@ from services.overview import (  # noqa: E402
     CREATION,
     DOCUMENT_UPLOAD,
     all_assessments,
+    earlier_approved_reviews,
     recent_activity,
 )
 from services.workflow import (  # noqa: E402
@@ -44,8 +45,10 @@ ACTIVITY_ICONS = {DOCUMENT_UPLOAD: ":material/upload_file:", AI_PROCESSING: ":ma
 PRIORITY = {PENDING_APPROVAL: 0, ON_HOLD: 1, NOT_STARTED: 2, UNDER_REVIEW: 3, IN_PROGRESS: 4}
 
 
-def open_case(case_id: str) -> None:
+def open_case(case_id: str, tab: str | None = None) -> None:
     open_assessment(case_id)
+    if tab:
+        st.session_state.switch_tab = tab
     st.switch_page(ASSESSMENT_PAGE)
 
 
@@ -65,7 +68,8 @@ with st.container(horizontal=True, vertical_alignment="center"):
             new_assessment()
             st.switch_page(ASSESSMENT_PAGE)
 
-everything = all_assessments()
+# Every assessment as it is now, plus earlier approved reviews that a periodic review has since followed
+everything = all_assessments() + earlier_approved_reviews()
 
 # --- Filters: by owner (whoever created the assessment) and by status ---
 
@@ -114,11 +118,17 @@ with st.container(horizontal=True, wrap=True):
 
 # --- Priority work queue ---
 
-ALL = "All assessments"
-if statuses:
-    shown = [a for a in assessments if a.status in statuses]
-else:
-    shown = assessments if chosen == ALL else cards[chosen][1]
+DEFAULT_CARD = "Active assessments"
+
+
+def clear_filters() -> None:
+    """Back to the default view: every active assessment, whoever owns it."""
+    st.session_state.dashboard_filter = DEFAULT_CARD
+    st.session_state.dashboard_statuses = []
+    st.session_state.dashboard_owner = EVERYONE
+
+
+shown = [a for a in assessments if a.status in statuses] if statuses else cards.get(chosen, cards[DEFAULT_CARD])[1]
 showing = ", ".join(statuses) if statuses else chosen.lower()
 if owner != EVERYONE:
     showing += f" · owned by {owner}"
@@ -126,9 +136,9 @@ queue = sorted(shown, key=lambda a: (PRIORITY.get(a.status, 9), a.risk != "High"
 with st.container(border=True):
     with st.container(horizontal=True, vertical_alignment="center"):
         st.subheader(f":material/format_list_bulleted: Priority work queue: {showing}", width="stretch")
-        if chosen != ALL or statuses:  # back to every assessment, whatever its status
-            st.button("Show all", icon=":material/select_all:", key="show_all", on_click=show_card, args=(ALL,),
-                      help="Every assessment, including approved, rejected and cancelled ones.")
+        if chosen != DEFAULT_CARD or statuses or owner != EVERYONE:  # hidden on the default view
+            st.button("Clear filters", icon=":material/filter_alt_off:", key="clear_filters", on_click=clear_filters,
+                      help="Back to all active assessments, for everyone.")
     if not everything:
         st.info("No assessments yet. Click **New assessment** to start one.", icon=":material/info:")
     elif not queue:
@@ -152,8 +162,8 @@ with st.container(border=True):
             action.markdown(a.next_action)
             if a.next_review:  # only assessments approved before have a next review date
                 action.caption("Review due " + datetime.fromisoformat(a.next_review).strftime("%d %b %Y"))
-            if opener.button("Open", key=f"open_{a.case_id}", icon=":material/arrow_forward:", width="stretch"):
-                open_case(a.case_id)
+            if opener.button("Open", key=f"open_{a.review_id}", icon=":material/arrow_forward:", width="stretch"):
+                open_case(a.case_id, "Ongoing monitoring" if a.followed_by else None)  # its review history
 
 # --- Recent activity ---
 

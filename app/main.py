@@ -13,7 +13,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # so "app" and "services" can be imported
 ASSETS = PROJECT_ROOT / "assets"
 
-from app.session import REVIEW_STATE, TEAM, WIDGET_PREFIXES, new_assessment  # noqa: E402
+from app.session import (  # noqa: E402
+    REVIEW_STATE,
+    TEAM,
+    WIDGET_PREFIXES,
+    discard_unsaved,
+    new_assessment,
+    open_assessment,
+    unsaved_summary,
+)
+from services.cases import list_cases  # noqa: E402
 
 st.set_page_config(page_title="Clario", page_icon=str(ASSETS / "clario-icon.svg"), layout="wide")
 st.logo(str(ASSETS / "clario-logo.svg"), icon_image=str(ASSETS / "clario-icon.svg"), size="large")
@@ -40,6 +49,7 @@ def sign_in() -> None:
             if st.button("Sign in", type="primary", icon=":material/login:", width="stretch"):
                 st.session_state.user = user
                 st.session_state.last_reviewer = user
+                st.session_state.just_signed_in = True  # signing in always opens the Dashboard
                 st.rerun()
         st.caption(":material/info: Demo environment: choose a team member to continue. No password is needed.")
 
@@ -50,6 +60,18 @@ def sign_out() -> None:
     for key in (*REVIEW_STATE, "user", "last_reviewer", "case_id", "entity", "current_tab", "dashboard_filter",
                 "dashboard_owner", "dashboard_statuses"):
         st.session_state.pop(key, None)
+    st.query_params.clear()
+
+
+# Stay signed in, with the same assessment and tab open, when the page is refreshed: the page's address keeps them
+remembered_user = st.query_params.get("user")
+if "user" not in st.session_state and remembered_user in TEAM:
+    st.session_state.user = st.session_state.last_reviewer = remembered_user
+    remembered_case = st.query_params.get("case")
+    if remembered_case and any(draft["id"] == remembered_case for draft in list_cases()):
+        open_assessment(remembered_case)
+        if st.query_params.get("tab"):
+            st.session_state.switch_tab = st.query_params["tab"]
 
 
 # Every page's address, so a bookmark or link opened while signed out shows the sign-in, then that page
@@ -86,7 +108,7 @@ def open_tab(tab: str, icon: str):
 
 
 workspace = [
-    st.Page("app_pages/dashboard.py", title="Dashboard", icon=":material/space_dashboard:", default=True),
+    dashboard := st.Page("app_pages/dashboard.py", title="Dashboard", icon=":material/space_dashboard:", default=True),
     st.Page("app_pages/assessments.py", title="Assessments", icon=":material/folder_open:", url_path="assessments"),
     st.Page(start_new_assessment, title="New assessment", icon=":material/add_circle:", url_path="new"),
     assessment,
@@ -110,4 +132,35 @@ with st.sidebar:
             st.markdown(f"**{st.session_state.user}**")
             st.caption(TEAM.get(st.session_state.user, "KYC Operations"))
     st.button("Sign out", icon=":material/logout:", type="tertiary", on_click=sign_out)
+
+
+@st.dialog("Unsaved changes", icon=":material/warning:", dismissible=False, width="medium")
+def unsaved_elsewhere() -> None:
+    """Shown when the menu is used to leave a checklist with changes that have not been saved."""
+    tab = next(iter(st.session_state.unsaved_lines.values()))["tab"]
+    st.warning(f"You left **{tab}** with checklist changes that have not been saved. Continuing without saving will "
+               "lose them.", icon=":material/warning:")
+    unsaved_summary()
+    back, discard = st.columns(2)
+    if back.button(f"Return to {tab}", type="primary", icon=":material/undo:", width="stretch"):
+        st.session_state.switch_tab = tab
+        st.switch_page(assessment)
+    if discard.button("Discard changes", icon=":material/delete:", width="stretch"):
+        discard_unsaved()
+        st.rerun()
+
+
+if st.session_state.pop("just_signed_in", False) and page.url_path != dashboard.url_path:
+    st.switch_page(dashboard)
+
+if st.session_state.get("unsaved_lines") and page.url_path not in ("assessment", "evidence-review"):
+    unsaved_elsewhere()
+    st.stop()  # the chosen page opens once the user has decided
+
+st.query_params["user"] = st.session_state.user
+for name, value in (("case", st.session_state.get("case_id")), ("tab", st.session_state.get("current_tab"))):
+    if value:
+        st.query_params[name] = value
+    else:
+        st.query_params.pop(name, None)
 page.run()

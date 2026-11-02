@@ -1,17 +1,18 @@
 """A summary of each saved KYC assessment, for the dashboard and the case list. Reads only what is already saved."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from services.audit import NO_NAME, load_events
 from services.cases import latest_reviews, load_progress
 from services.checklist import CHECKLISTS, load_checks
-from services.cycles import approved_snapshots, current_cycle, cycle_key, load_submission
+from services.cycles import approved_snapshots, current_cycle, cycle_key, cycle_review_id, load_submission
 from services.industry import INDUSTRIES
 from services.reviews import case_file, load_approval, load_overrides
 from services.risk import load_risk_decision
 from services.validator import Status
 from services.workflow import (
+    APPROVED,
     IN_PROGRESS,
     NOT_STARTED,
     ON_HOLD,
@@ -46,10 +47,15 @@ class AssessmentSummary:
     cycle: int = 1  # 1 for onboarding, then one more for each periodic review
     ready: bool = False  # every line is Present and validated, so it can be submitted for approval
     owner: str = ""  # whoever created the assessment, or the analyst it was reassigned to
+    last_activity: str = ""  # YYYY-MM-DD HH:MM of the latest change of any kind
+    original_review_id: str = ""  # the onboarding review's ID; review_id is the current cycle's own ID
+    followed_by: str = ""  # for an earlier approved review: the ID of the periodic review that followed it
 
     @property
     def next_action(self) -> str:
         """What needs doing next, in a few words."""
+        if self.followed_by:
+            return f"Followed by {self.followed_by}"
         return {
             NOT_STARTED: "Start the periodic review",
             IN_PROGRESS: "Confirm the industry and risk rating",
@@ -104,12 +110,19 @@ def summarise(draft: dict, folder: Path | None = None) -> AssessmentSummary:
     else:
         next_review = ""
     return AssessmentSummary(
-        case_id, draft["review_id"], draft["entity_name"] or "Unnamed entity", draft.get("company_link", ""),
+        case_id, cycle_review_id(case_id, cycle), draft["entity_name"] or "Unnamed entity", draft.get("company_link", ""),
         INDUSTRIES.get(industry_key, ""), CHECKLISTS[checklist_key][0] if checklist_key in CHECKLISTS else "",
         decision.rating if decision else "", validated, lines, status, approval.approver if approval else "",
         draft["saved_at"].replace("T", " ")[:16], manual.reason if manual else "", next_review, cycle,
-        bool(lines) and complete >= lines, owner_of(draft),
+        bool(lines) and complete >= lines, owner_of(draft), last_activity(draft), draft["review_id"],
     )
+
+
+def last_activity(draft: dict) -> str:
+    """When anyone last worked on the assessment: its newest audit log entry, or when it was last saved."""
+    events = load_events(case_file(draft["id"], "audit").with_suffix(".jsonl"))
+    saved = draft["saved_at"].replace("T", " ")
+    return max([saved] + [e.at for e in events])[:16]
 
 
 UNASSIGNED = "Unassigned"
@@ -128,6 +141,26 @@ def owner_of(draft: dict) -> str:
 def all_assessments(folder: Path | None = None) -> list[AssessmentSummary]:
     """Every saved assessment (one per legal entity), most recently saved first."""
     return [summarise(draft, folder) for draft in latest_reviews(folder)]
+
+
+def earlier_approved_reviews(folder: Path | None = None) -> list[AssessmentSummary]:
+    """Approved reviews that a periodic review has since followed: one row each, with its own ID, status Approved
+    and the risk rating, checklist and next review date it was approved with."""
+    rows = []
+    for current in all_assessments(folder):
+        for snapshot in approved_snapshots(current.case_id, folder):
+            if snapshot.cycle == current.cycle:
+                continue  # the current review already has its row
+            rating = snapshot.risk.get("rating", "")
+            reviewed = [line for line in snapshot.lines if line.section.startswith(REVIEWED_BEFORE_APPROVAL)]
+            rows.append(replace(
+                current, review_id=cycle_review_id(current.case_id, snapshot.cycle), status=APPROVED, risk=rating,
+                industry=INDUSTRIES.get(snapshot.industry, current.industry),
+                checklist=CHECKLISTS[snapshot.checklist][0] if snapshot.checklist in CHECKLISTS else current.checklist,
+                validated=len(reviewed), lines=len(reviewed), approved_by=snapshot.approved_by, status_reason="",
+                next_review=next_review_date(snapshot.approved_on, rating).isoformat(), cycle=snapshot.cycle,
+                ready=False, last_activity=snapshot.approved_on, followed_by=current.review_id))
+    return rows
 
 
 # --- Recent activity across every assessment, from their audit logs ---
