@@ -14,11 +14,12 @@ from services.pack import DOCUMENT_TYPES  # noqa: E402
 
 
 
-def cards(items: list[tuple[str, str, str]]) -> None:
-    """A row of bordered cards, each with an icon, a heading and a sentence."""
-    with st.container(horizontal=True):
+def cards(items: list[tuple[str, str, str]], height: int) -> None:
+    """Bordered cards, each with an icon, a heading and a sentence, all the same size (height fits the longest text).
+    They sit in rows and wrap onto the next row on narrow screens."""
+    with st.container(horizontal=True, wrap=True):
         for icon, heading, text in items:
-            with st.container(border=True):
+            with st.container(border=True, width=250, height=height):
                 st.markdown(f"**{icon} {heading}**")
                 st.caption(text)
 
@@ -69,7 +70,7 @@ cards([
     (":material/speed:", "5. Suggests a risk rating",
      "Rates customer, product, geography and delivery channel risk against the firm's risk methodology and flags enhanced due "
      "diligence triggers. The confirmed rating sets the checklist: simplified, standard or enhanced."),
-])
+], height=280)
 
 # --- What you'll get ---
 
@@ -82,7 +83,7 @@ cards([
      "What to request from the client and what to check on public registers."),
     (":material/speed:", "Suggested risk rating",
      "Low, Medium or High, with the reasons and evidence for each factor, and a checklist to match."),
-])
+], height=190)
 
 # --- Review, verification and decision ---
 
@@ -99,26 +100,27 @@ cards([
     (":material/gavel:", "KYC decision: what your firm determines",
      "Confirming the client's risk rating and deciding whether onboarding, further due diligence or escalation is "
      "appropriate. Clario suggests a rating; the reviewer confirms it, and senior management gives final approval."),
-])
+], height=290)
 
 # --- More detail ---
 
-left, middle, right = st.columns(3)
-with left.container(border=True):
-    st.markdown("**:material/groups: Who it's for**")
-    st.markdown("KYC analysts, client onboarding teams, compliance professionals and client operations teams.")
-with middle.container(border=True):
-    st.markdown("**:material/upload_file: What to upload**")
-    st.markdown("PDFs or photos (PNG, JPEG, WebP, GIF) of documents such as:")
-    st.markdown("\n".join(f"- {label}" for key, label in DOCUMENT_TYPES.items() if key != "other"))
-with right.container(border=True):
-    st.markdown("**:material/block: What it doesn't do**")
-    st.markdown(
-        "- It doesn't verify that a document is authentic.\n"
-        "- It doesn't run sanctions, PEP or adverse media screening.\n"
-        "- It doesn't make the risk decision or approve a client: it suggests a rating for the reviewer to "
-        "confirm."
-    )
+# Three boxes, all the same size; they wrap onto the next row on narrow screens
+with st.container(horizontal=True, wrap=True):
+    with st.container(border=True, width=330, height=470):
+        st.markdown("**:material/groups: Who it's for**")
+        st.markdown("KYC analysts, client onboarding teams, compliance professionals and client operations teams.")
+    with st.container(border=True, width=330, height=470):
+        st.markdown("**:material/upload_file: What to upload**")
+        st.markdown("PDFs or photos (PNG, JPEG, WebP, GIF) of documents such as:")
+        st.markdown("\n".join(f"- {label}" for key, label in DOCUMENT_TYPES.items() if key != "other"))
+    with st.container(border=True, width=330, height=470):
+        st.markdown("**:material/block: What it doesn't do**")
+        st.markdown(
+            "- It doesn't verify that a document is authentic.\n"
+            "- It doesn't run sanctions, PEP or adverse media screening.\n"
+            "- It doesn't make the risk decision or approve a client: it suggests a rating for the reviewer to "
+            "confirm."
+        )
 
 with st.container(border=True):
     st.markdown("**:material/lock: How client information is handled**")
