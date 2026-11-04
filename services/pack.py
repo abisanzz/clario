@@ -13,6 +13,7 @@ from services.documents import (
     OnboardingQuestionnaire,
     ProofOfAddress,
 )
+from services.companies_house import get_company
 from services.conversion import TEXT_TYPES, CannotRead, is_text_type, to_text
 from services.environment import SYNTHETIC_NOTE
 from services.extractor import (
@@ -545,7 +546,9 @@ def assess_pack(
     lookup_kwargs = {"lookup": company_lookup} if company_lookup else {}
     rules: dict[str, CheckResult] = {
         "1.1": check_1_1(certificate, today=today),
-        "1.2": check_1_2(proof, questionnaire, certificate, today=today),
+        "1.2": check_1_2(proof, questionnaire, certificate, today=today,
+                         office_quotes=claude_view.get("1.2", (None, None, []))[2],
+                         lookup=company_lookup or get_company),
         "1.3": check_1_3(certificate, today=today, **lookup_kwargs),
         "1.4": check_1_4(articles, certificate),
     }

@@ -56,7 +56,8 @@ def test_trading_elsewhere_with_address_is_present():
 def test_no_proof_of_address_is_missing():
     result = run(None, questionnaire(True))
     assert result.status is Status.MISSING
-    assert result.finding == "No proof of registered address provided"
+    assert result.finding == ("No proof of registered address provided, and no registered office found in the "
+                              "documents")
 
 
 @pytest.mark.parametrize("empty", [None, "", "  "])
@@ -176,3 +177,24 @@ def test_several_problems_are_all_listed():
     assert "dated 1 Jan 2025" in result.finding
     assert "'OTHER CO LTD'" in result.finding
     assert "gave no principal place of business" in result.finding
+
+
+def test_an_office_only_in_the_documents_is_unclear_not_missing():
+    quotes = ['01_Certificate.pdf p.1: "Registered office 20 Example Square, London, EC2A 4TEST"',
+              '03_Confirmation_Statement.pdf p.1: "Registered office 20 Example Square, London, EC2A 4TEST"',
+              '05_Chart.pdf p.1: "Two direct owners"']  # not about the address, so not counted
+    result = check_1_2(None, None, office_quotes=quotes)
+    assert result.status is Status.UNCLEAR
+    assert result.finding.startswith("The registered office appears in 2 document(s) (01_Certificate.pdf, "
+                                     "03_Confirmation_Statement.pdf), but no proof of registered address was provided")
+    assert "not been checked against Companies House" in result.finding
+
+
+def test_companies_house_can_confirm_the_registered_office():
+    certificate = CertificateOfIncorporation(company_name=Fact("EXAMPLE LTD"), company_number=Fact("12345678"))
+    record = {"registered_office_address": {"address_line_1": "1 High Street", "locality": "London",
+                                            "postal_code": "EC1A 1AA"}}
+    trades_there = check_1_2(None, questionnaire(True), certificate, lookup=lambda number: record)
+    assert trades_there.status is Status.PRESENT and "confirmed on Companies House" in trades_there.finding
+    unknown = check_1_2(None, None, certificate, lookup=lambda number: record)
+    assert unknown.status is Status.UNCLEAR and "principal place of business" in unknown.finding

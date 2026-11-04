@@ -152,15 +152,53 @@ def entity_name_rule(
     return False, f"Legal entity name entered ({entered}) does not match Companies House ({registered})"
 
 
+def _office_without_proof(certificate: CertificateOfIncorporation | None,
+                          questionnaire: OnboardingQuestionnaire | None, office_quotes: list[str],
+                          lookup: Callable[[str], dict] | None) -> CheckResult:
+    """Check 1.2 when no proof of address was supplied. The checklist also accepts Companies House, so a live record
+    confirms the registered office. Failing that, an office that only appears in the customer's documents is
+    extracted, not verified: Unclear, not Missing."""
+    number = certificate.company_number.value if certificate else None
+    if lookup and not _is_blank(number):
+        try:
+            record = lookup(re.sub(r"\s", "", str(number)).upper())
+        except (CompanyNotFound, LookupFailed):
+            record = {}
+        address = record.get("registered_office_address") or {}
+        office = ", ".join(str(address[k]) for k in ("address_line_1", "address_line_2", "locality", "postal_code")
+                           if address.get(k))
+        if office:
+            trades_there = questionnaire.trades_from_registered_office.value if questionnaire else None
+            if trades_there is True:
+                return CheckResult("1.2", Status.PRESENT, f"No proof of address was provided, but the registered "
+                                   f"office ({office}) is confirmed on Companies House, and the client trades from it",
+                                   "Companies House API")
+            return CheckResult("1.2", Status.UNCLEAR, f"The registered office ({office}) is confirmed on Companies "
+                               "House, but it is not stated whether the principal place of business differs",
+                               "Companies House API")
+    documents = sorted({quote.split(" p.")[0].split(":")[0] for quote in office_quotes
+                        if re.search(r"registered office|address", quote, re.IGNORECASE)})
+    if documents:
+        return CheckResult("1.2", Status.UNCLEAR, f"The registered office appears in {len(documents)} document(s) "
+                           f"({', '.join(documents)}), but no proof of registered address was provided and it has "
+                           "not been checked against Companies House: request proof of address or confirm it on the "
+                           "register")
+    return CheckResult("1.2", Status.MISSING, "No proof of registered address provided, and no registered office "
+                       "found in the documents")
+
+
 def check_1_2(
     proof: ProofOfAddress | None,
     questionnaire: OnboardingQuestionnaire | None,
     certificate: CertificateOfIncorporation | None = None,
     today: date | None = None,
+    office_quotes: list[str] = (),
+    lookup: Callable[[str], dict] | None = None,
 ) -> CheckResult:
-    """Registered office and principal place of business, if different."""
+    """Registered office and principal place of business, if different. office_quotes is where the documents show
+    the registered office (used when there is no proof of address); lookup checks Companies House."""
     if proof is None:
-        return CheckResult("1.2", Status.MISSING, "No proof of registered address provided")
+        return _office_without_proof(certificate, questionnaire, list(office_quotes), lookup)
 
     today = today or date.today()
     questionnaire = questionnaire or OnboardingQuestionnaire()
