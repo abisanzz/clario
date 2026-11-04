@@ -13,6 +13,8 @@ from services.documents import (
     OnboardingQuestionnaire,
     ProofOfAddress,
 )
+from services.conversion import TEXT_TYPES, CannotRead, is_text_type, to_text
+from services.environment import SYNTHETIC_NOTE
 from services.extractor import (
     IMAGE_TYPES,
     ask_claude,
@@ -33,7 +35,7 @@ from services.validator import (
     entity_name_rule,
 )
 
-SUPPORTED_TYPES = {"application/pdf"} | IMAGE_TYPES
+SUPPORTED_TYPES = {"application/pdf"} | IMAGE_TYPES | set(TEXT_TYPES.values())  # Word, Excel etc. go as text
 
 # Document types, worded like the checklist's "Evidence source" column
 DOCUMENT_TYPES = {
@@ -46,6 +48,11 @@ DOCUMENT_TYPES = {
     "identity_document": "Director / UBO ID",
     "board_resolution": "Board resolution or signatory list",
     "onboarding_questionnaire": "AML / onboarding questionnaire",
+    "company_register_profile": "Company register profile or extract",
+    "confirmation_statement": "Confirmation statement",
+    "psc_register": "PSC register or beneficial ownership declaration",
+    "regulatory_status": "Regulatory register entry or authorisation",
+    "financial_statements": "Financial statements or accounts",
     "policy_document": "Policy (e.g. record retention, AML)",
     "other": "Other / not identified",
 }
@@ -67,6 +74,7 @@ class UploadedDocument:
     data: bytes
     media_type: str = "application/pdf"
     description: str = ""  # what the analyst says the document shows (optional)
+    synthetic: bool = False  # part of a synthetic test assessment: assessed as genuine, test status kept apart
 
     @property
     def fingerprint(self) -> str:
@@ -150,28 +158,44 @@ IDENTIFY_SCHEMA = {
 
 def pack_fingerprint(documents: list[UploadedDocument]) -> str:
     """Changes if any file, file name or the order of files changes."""
-    lines = "\n".join(f"{d.name}:{d.fingerprint}" + (f":{d.description}" if d.description else "") for d in documents)
+    lines = "\n".join(f"{d.name}:{d.fingerprint}" + (f":{d.description}" if d.description else "")
+                      + (":synthetic" if d.synthetic else "") for d in documents)
     return hashlib.sha256(lines.encode()).hexdigest()
 
 
+def text_block(document: UploadedDocument) -> dict:
+    """A Word, Excel, CSV, text, email or web page file, sent as its text content."""
+    try:
+        text = to_text(document.name, document.data, document.media_type)
+    except CannotRead as error:
+        raise UnsupportedFile(str(error)) from error
+    if not text.strip():
+        raise UnsupportedFile(f"{document.name}: no text was found in this file")
+    return {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": text},
+            "title": document.name}
+
+
 def numbered_files(documents: list[UploadedDocument]) -> list[dict]:
-    """Each file, introduced by its number and name, ready to send to Claude."""
-    content = []
+    """Each file, introduced by its number and name, ready to send to Claude. For a synthetic test assessment, a note
+    first explains that test markings are provenance, so the substantive content is assessed as genuine evidence."""
+    content = [{"type": "text", "text": SYNTHETIC_NOTE}] if any(d.synthetic for d in documents) else []
     for number, document in enumerate(documents, start=1):
         if document.media_type not in SUPPORTED_TYPES:
-            raise UnsupportedFile(f"{document.name}: only PDFs and images (PNG, JPEG, GIF, WebP) can be read")
+            raise UnsupportedFile(f"{document.name}: this type of file can't be read. Upload a PDF, image, Word, "
+                                  "Excel, CSV, text, email or web page file")
         intro = f"File {number}: {document.name}"
         if document.description:
             intro += f" (the analyst says it shows: {document.description})"
         content.append({"type": "text", "text": intro})
-        content.append(file_block(document.data, document.media_type))
+        content.append(text_block(document) if is_text_type(document.media_type)
+                       else file_block(document.data, document.media_type))
     return content
 
 
 IDENTIFY_REQUEST = """There are {count} files above. For every file, give:
 - file_number, and the document_type from this list, with a one-sentence reason:
 {types}
-- company_name, registration_number and registered_address of the company the file is about
+- company_name, registration_number and registered_address of the company the file is about; registration_number is the company's registration (company) number as printed, e.g. on the certificate, register or confirmation statement, and never an FCA firm reference number (FRN)
 - document_date: the date the document was issued or signed, as YYYY-MM-DD if clear
 - people: everyone named with a role (director, secretary, signatory, shareholder, beneficial owner, ID holder)
 - owners: each shareholder or owner with their share as printed (e.g. "75%" or "750 ordinary shares")"""

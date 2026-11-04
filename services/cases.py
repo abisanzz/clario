@@ -17,7 +17,8 @@ from services.validator import normalise_company_name
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
 DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn", "country", "registration_number",
-                 "stated_industry", "owner")  # owner: whoever created the assessment, until an analyst reassigns it
+                 "stated_industry", "owner", "customer_reference", "customer_type", "environment",
+                 "data_classification")  # owner: whoever created the assessment, until an analyst reassigns it
 
 
 def new_case_id() -> str:

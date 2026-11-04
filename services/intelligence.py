@@ -28,6 +28,12 @@ class KeyFact:
         return len(self.values) > 1
 
 
+def is_firm_reference(value: str) -> bool:
+    """An FCA firm reference number given as a "registration number": it isn't a company number, so it is left out
+    when company numbers are compared."""
+    return "FRN" in value.upper().replace(" ", "")
+
+
 def key_facts(details: dict[str, DocumentDetails]) -> list[KeyFact]:
     """For the company name, registration number and registered address: what each document says."""
     facts = []
@@ -35,7 +41,7 @@ def key_facts(details: dict[str, DocumentDetails]) -> list[KeyFact]:
         values, printed = {}, {}
         for name, found in details.items():
             value = getattr(found, attribute)
-            if value:
+            if value and not (attribute == "registration_number" and is_firm_reference(value)):
                 key = normalise(value)
                 printed.setdefault(key, value)
                 values.setdefault(printed[key], []).append(name)
@@ -57,11 +63,18 @@ def people(details: dict[str, DocumentDetails]) -> list[tuple[str, list[str], li
     return list(found.values())
 
 
+def percentage(share: str) -> str:
+    """The percentage in a share as printed, e.g. "600 ordinary shares (60%)" -> "60%"; "" if none is given."""
+    found = re.search(r"(\d+(?:\.\d+)?)\s*%", share)
+    return f"{float(found.group(1)):g}%" if found else ""
+
+
 def owners(details: dict[str, DocumentDetails]) -> list[tuple[str, dict[str, list[str]]]]:
-    """Each owner with the share each document gives them: (name, {share: documents})."""
+    """Each owner with the share each document gives them: (name, {share: documents}). Shares are compared by their
+    percentage where one is given, so "60%" and "600 ordinary shares (60%)" agree."""
     found: dict[str, tuple[str, dict[str, list[str]]]] = {}
     for document, d in details.items():
         for name, share in d.owners:
             entry = found.setdefault(normalise(name), (name, {}))
-            entry[1].setdefault(share or "share not stated", []).append(document)
+            entry[1].setdefault(percentage(share) or share or "share not stated", []).append(document)
     return list(found.values())

@@ -106,14 +106,14 @@ cards([
 
 # Three boxes, all the same size; they wrap onto the next row on narrow screens
 with st.container(horizontal=True, wrap=True):
-    with st.container(border=True, width=330, height=470):
+    with st.container(border=True, width=330, height=600):
         st.markdown("**:material/groups: Who it's for**")
         st.markdown("KYC analysts, client onboarding teams, compliance professionals and client operations teams.")
-    with st.container(border=True, width=330, height=470):
+    with st.container(border=True, width=330, height=600):
         st.markdown("**:material/upload_file: What to upload**")
-        st.markdown("PDFs or photos (PNG, JPEG, WebP, GIF) of documents such as:")
+        st.markdown("PDFs, Word, Excel, CSV, text, emails, web pages or photos of documents such as:")
         st.markdown("\n".join(f"- {label}" for key, label in DOCUMENT_TYPES.items() if key != "other"))
-    with st.container(border=True, width=330, height=470):
+    with st.container(border=True, width=330, height=600):
         st.markdown("**:material/block: What it doesn't do**")
         st.markdown(
             "- It doesn't verify that a document is authentic.\n"

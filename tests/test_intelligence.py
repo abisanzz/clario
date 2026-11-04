@@ -68,3 +68,18 @@ def test_key_facts_flag_where_the_documents_disagree():
 def test_normalising_names():
     assert normalise("Example Payments Limited.") == normalise("EXAMPLE  PAYMENTS LTD")
     assert DocumentDetails().empty and not DocumentDetails(company_name="X").empty
+
+
+def test_an_fca_firm_reference_is_not_compared_as_a_company_number():
+    details = {"cert.pdf": DocumentDetails("Sterling Asset Management Limited", "CLARIO-TEST-001"),
+               "fca.pdf": DocumentDetails("Sterling Asset Management Limited", "CLARIO-FRN-TEST-001")}
+    numbers = {f.fact: f for f in key_facts(details)}["Registration number"]
+    assert not numbers.disagree and numbers.values == {"CLARIO-TEST-001": ["cert.pdf"]}
+
+
+def test_shares_are_compared_by_their_percentage():
+    from services.intelligence import percentage
+    assert percentage("600 ordinary shares (60%)") == percentage("60 %") == "60%"
+    details = {"register.pdf": DocumentDetails(owners=[("Amelia Hart", "600 ordinary shares (60%)")]),
+               "psc.pdf": DocumentDetails(owners=[("Amelia Hart", "60%")])}
+    assert owners(details) == [("Amelia Hart", {"60%": ["register.pdf", "psc.pdf"]})]

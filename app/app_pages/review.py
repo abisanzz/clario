@@ -19,6 +19,8 @@ from services.companies_house import (  # noqa: E402
     CompanyNotFound,
     LookupFailed,
     get_company,
+    get_officers,
+    get_persons_with_significant_control,
     nature_of_business,
     parse_company_number,
 )
@@ -73,7 +75,29 @@ from services.cases import (  # noqa: E402
     save_review,
 )
 from services.checklist import CHECKLISTS, load_checks  # noqa: E402
+from services.conversion import (  # noqa: E402
+    CSV,
+    UPLOAD_EXTENSIONS,
+    XLSX,
+    CannotRead,
+    csv_rows,
+    is_text_type,
+    media_type_for,
+    sheets,
+    to_text,
+)
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
+from services.environment import (  # noqa: E402
+    CLASSIFICATIONS,
+    CUSTOMER_TYPES,
+    ENVIRONMENTS,
+    LIVE,
+    REAL,
+    SYNTHETIC,
+    TEST,
+    metadata_of,
+)
+from services.verification import NOT_VERIFIED, check_facts, companies_house_record  # noqa: E402
 from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
@@ -128,7 +152,7 @@ SAMPLE_ANSWERS = {
 SAMPLE_ENTITY_NAME = "EXAMPLE PAYMENTS LTD"
 SAMPLE_COMPANY_NUMBER = "99999901"
 SAMPLE_FCA_FRN = "999999"  # the specimen FRN in the sample questionnaire; not on the FCA register
-UPLOAD_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "gif"]
+UPLOAD_TYPES = UPLOAD_EXTENSIONS  # PDFs, images, Word, Excel, CSV, text, emails and web pages
 
 STATUS_TEXT = {
     Status.PRESENT: "✅ Present",
@@ -216,6 +240,26 @@ def show_entity_name_check(entity_name: str, link_or_number: str) -> None:
 
 
 @st.cache_data(ttl=3600, max_entries=50, show_spinner="Looking up the FCA register...")
+@st.cache_data(ttl=3600, max_entries=50, show_spinner=False)
+def register_record(company_number: str):
+    """The live Companies House record used for external verification, or None if there isn't one."""
+    return companies_house_record(company_number, get_company, get_officers, get_persons_with_significant_control)
+
+
+def fca_status_of(frn: str) -> str:
+    """The firm's status on the live FCA register, or "" if it wasn't checked or isn't there."""
+    if not parse_frn(frn):
+        return ""
+    firm = fca_firm(frn)
+    return firm.get("Status", "") if isinstance(firm, dict) else ""
+
+
+def fact_checks(details: dict, link: str, frn: str) -> list:
+    """The key facts with extraction, cross-document check and external verification kept apart."""
+    number = parse_company_number(link) if link else None
+    return check_facts(details, register_record(number) if number else None, fca_status_of(frn))
+
+
 def fca_firm(frn: str) -> dict | str:
     """The firm's main FCA register entry, or a sentence saying why there is none."""
     try:
@@ -403,6 +447,15 @@ def details_tab() -> None:
                     open_assessment(existing["id"])
                     st.rerun()
 
+        reference_side, type_side = st.columns(2)
+        customer_reference = reference_side.text_input(
+            "Customer reference", value=saved.get("customer_reference", ""), key="customer_reference",
+            placeholder="e.g. CLARIO-TEST-001", help="Your firm's own reference for this customer.")
+        known_type = saved.get("customer_type") or CUSTOMER_TYPES[0]
+        customer_type = type_side.selectbox("Customer type", CUSTOMER_TYPES, key="customer_type",
+                                            index=CUSTOMER_TYPES.index(known_type) if known_type in CUSTOMER_TYPES
+                                            else 0)
+
         source = st.segmented_control(
             "Documents", ["Upload documents", "Sample pack"], default=saved.get("source", "Upload documents"),
             key="source",
@@ -423,9 +476,11 @@ def details_tab() -> None:
                                        default=[d.name for d in earlier], key="kept_documents",
                                        help="Remove a document by clicking its ×. Add more below.")
                 kept = [d for d in earlier if d.name in names]
-            uploads = st.file_uploader("Add documents (PDFs or photos)" if earlier else "Company documents (PDFs or photos)",
+            uploads = st.file_uploader("Add documents" if earlier else "Company documents",
+                                       help="PDFs, Word (.docx), Excel (.xlsx), CSV, text, emails (.eml), web pages "
+                                            "(.html) or photos (PNG, JPEG, WebP, GIF).",
                                        type=UPLOAD_TYPES, accept_multiple_files=True)
-            added = [UploadedDocument(u.name, u.getvalue(), u.type or "application/pdf") for u in uploads or []]
+            added = [UploadedDocument(u.name, u.getvalue(), media_type_for(u.name, u.type)) for u in uploads or []]
             added_names = {d.name for d in added}
             documents = [d for d in kept if d.name not in added_names] + added  # a new file replaces one with its name
             if documents:  # what each document shows, in the analyst's words (optional)
@@ -445,9 +500,31 @@ def details_tab() -> None:
                 ":material/lock: Documents are processed by Clario's AI service. Upload only documents your "
                 "data-handling policy permits.")
 
+    # The test-environment record: kept apart from the documents, never a document exception
+    with st.container(border=True):
+        st.markdown("**:material/science: Environment**")
+        if source == "Sample pack":
+            environment, data_classification = TEST, SYNTHETIC
+            st.caption("The example case is always **Test** data, classified **Synthetic**.")
+        else:
+            environment_side, classification_side = st.columns(2)
+            environment = environment_side.segmented_control(
+                "Environment", ENVIRONMENTS, default=saved.get("environment") or LIVE, key="environment",
+                help="Test: a test customer, e.g. for training or checking Clario. Live: a real onboarding.") or LIVE
+            data_classification = classification_side.segmented_control(
+                "Data classification", CLASSIFICATIONS, key="data_classification",
+                default=saved.get("data_classification") or (SYNTHETIC if environment == TEST else REAL),
+                help="Synthetic: fictional documents made for testing. Real: genuine customer documents."
+            ) or (SYNTHETIC if environment == TEST else REAL)
+        st.caption("Synthetic documents are assessed as if they were genuine customer evidence. Their test status is "
+                   "kept here, separately, and is never treated as a document exception. Nothing is described as "
+                   "externally verified unless a live Companies House or FCA register check confirms it.")
+
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
                "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
-               "stated_industry": stated_industry, "owner": owner.strip()}
+               "stated_industry": stated_industry, "owner": owner.strip(),
+               "customer_reference": customer_reference.strip(), "customer_type": customer_type,
+               "environment": environment, "data_classification": data_classification}
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:", disabled=not owner.strip()):
             save_draft(details, documents)
@@ -511,12 +588,24 @@ def view_document(name: str, data: bytes, media_type: str) -> None:
     with st.container(horizontal=True, vertical_alignment="center"):
         st.markdown(f"**{name}**", width="stretch")
         st.download_button("Download", data, file_name=name, mime=media_type, icon=":material/download:")
-    if media_type == "application/pdf":
-        st.pdf(data, height=720)
-    elif media_type.startswith("image/"):
-        st.image(data)
-    else:
-        st.info("This type of file can't be shown here. Download it to open it.", icon=":material/info:")
+    try:
+        if media_type == "application/pdf":
+            st.pdf(data, height=720)
+        elif media_type.startswith("image/"):
+            st.image(data)
+        elif media_type == XLSX:
+            for sheet, rows in sheets(data):
+                st.markdown(f"**Sheet: {sheet}**")
+                st.dataframe(pd.DataFrame(rows), hide_index=True)
+        elif media_type == CSV:
+            st.dataframe(pd.DataFrame(csv_rows(data)), hide_index=True)
+        elif is_text_type(media_type):
+            with st.container(border=True, height=620):
+                st.text(to_text(name, data, media_type))
+        else:
+            st.info("This type of file can't be shown here. Download it to open it.", icon=":material/info:")
+    except CannotRead as error:
+        st.warning(f"{error}. Download it to open it.", icon=":material/warning:")
 
 
 @st.dialog("Unsaved changes", icon=":material/warning:", dismissible=False, width="medium")
@@ -560,6 +649,10 @@ if not saved:  # a new assessment: only the details tab can be used until it is 
 source = saved["source"]
 entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
 documents = (SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]) + saved.get("supporting", [])
+test_record = metadata_of(saved)
+ASSESS_AS_TEST = test_record.synthetic and source != "Sample pack"  # the example case keeps its saved answers
+if ASSESS_AS_TEST:
+    documents = [replace(d, synthetic=True) for d in documents]
 saved_answers = SAMPLE_ANSWERS if source == "Sample pack" else answer_paths(st.session_state.case_id)
 
 
@@ -718,6 +811,83 @@ def delete_documents(chosen: list[tuple[UploadedDocument, dict | None]]) -> None
     st.session_state.pop("delete_pending", None)
 
 
+class NotSavedYet(Exception):
+    """A step that has no saved answer to replay."""
+
+
+class ReplayOnly:
+    """Stands in for the AI service when reopening a saved assessment: saved answers replay for free, and a step
+    with no saved answer stops here instead of calling the paid service."""
+
+    class _Messages:
+        def create(self, **_):
+            raise NotSavedYet
+
+    beta = type("Beta", (), {"messages": _Messages()})()
+
+
+def replay_only(step):
+    try:
+        return step()
+    except NotSavedYet:
+        return None
+
+
+def lines_to_resolve() -> int | None:
+    """Checklist lines (sections 1 to 6) that are Missing, Unclear or need human review, once the checks have run."""
+    if not st.session_state.get("assessment") or not st.session_state.get("choice"):
+        return None
+    checked = apply_overrides(st.session_state.assessment[1],
+                              load_overrides(case_file(cycle_review_key, st.session_state.choice[1])))
+    return sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in checked.outcomes
+               if not o.check.section.startswith(("7.", "8.")))
+
+
+def show_workspace() -> None:
+    """The customer at a glance: who they are, where the assessment stands, and what is extracted versus verified."""
+    if "identification" not in st.session_state and st.session_state.get("labels"):  # reopened: replay, free
+        restored = replay_only(lambda: identify_documents(documents, saved_answer=saved_answers.get("labels"),
+                                                          client=ReplayOnly()))
+        if restored:
+            st.session_state.identification = restored
+    identified = st.session_state.get("identification")
+    extracted = identified.details if identified and identified.extracted else {}
+    checks = fact_checks(extracted, company_link, fca_frn) if extracted else []
+    verified = sum(c.externally_verified for c in checks)
+    discrepancies = [c.fact for c in checks if not c.consistent]
+    to_resolve = lines_to_resolve()
+    tiles = [
+        ("Customer reference", test_record.customer_reference or "Not set", ""),
+        ("Customer type", saved.get("customer_type") or "Not set", ""),
+        ("KYC status", current.status if current else "Draft", ""),
+        ("Documents received", str(len(documents)), f"{len(stored_supporting)} supporting" if stored_supporting else ""),
+        ("Extraction", f"{len(extracted)} of {len(documents)} documents" if identified and identified.extracted
+         else "Not run yet", "Key facts read from the documents" if extracted else "Opens on Document intelligence"),
+        ("Verification", (f"{verified} of {len(checks)} facts" if verified else NOT_VERIFIED) if checks
+         else "Not run yet", "Checked against live registers" if verified else "No live register check confirmed a fact"
+         if checks else ""),
+        ("Outstanding evidence", f"{to_resolve} lines" if to_resolve is not None else "Checks not run",
+         "Missing, unclear or needing review" if to_resolve is not None else "Opens on Evidence review"),
+        ("Discrepancies", str(len(discrepancies)) if checks else "Not run yet",
+         ", ".join(discrepancies) if discrepancies else ("Documents agree" if checks else "")),
+    ]
+    with st.container(horizontal=True, wrap=True):
+        for label, value, note in tiles:
+            with st.container(border=True, width=210, height=112, gap=None):
+                st.caption(label)
+                st.markdown(f"**{value}**")
+                if note:
+                    st.caption(note)
+    if test_record.environment == TEST or test_record.synthetic:
+        st.info(f"**Test environment** · Customer reference: {test_record.customer_reference or 'not set'} · "
+                f"Environment: {test_record.environment} · Data classification: {test_record.data_classification} · "
+                f"External verification: {f'{verified} of {len(checks)} facts' if verified else NOT_VERIFIED}. "
+                "Test data is assessed as genuine evidence; this record is kept separately.", icon=":material/science:")
+
+
+if st.session_state.get("case_id"):
+    show_workspace()
+
 with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)})", icon=":material/folder_open:"):
     rows = [(d, None) for d in original_documents] + list(stored_supporting)
     st.caption("Select a document to view it, or select documents to delete.")
@@ -849,8 +1019,9 @@ def show_key_facts(identification) -> None:
         if not facts and not people(details) and not owners(details):
             st.caption("No company details were found in these documents.")
             return
-        st.caption("What each document says, as printed. Differences in capitals, punctuation and Limited/Ltd are "
-                   "ignored. Validate anything flagged.")
+        st.caption("**Extracted:** what the documents say, as printed. **Across documents:** whether they agree "
+                   "(capitals, punctuation and Limited/Ltd are ignored). **External verification:** only a live "
+                   "Companies House or FCA register check counts; documents the customer supplied never do.")
         names = {normalise(value) for fact in facts if fact.fact == "Company name" for value in fact.values}
         if entity_name.strip() and names and normalise(entity_name) not in names:
             st.warning(f"**The Legal Entity name you entered ({entity_name}) is not the name on the documents.**",
@@ -860,10 +1031,17 @@ def show_key_facts(identification) -> None:
                 st.warning(f"**{fact.fact}: the documents disagree.**\n" + "\n".join(
                     f"- {value}: {', '.join(found_in)}" for value, found_in in fact.values.items()),
                     icon=":material/warning:")
-            else:
-                [(value, found_in)] = fact.values.items()
-                st.markdown(f":material/check_circle: **{fact.fact}:** {value}")
-                st.caption(f"In {', '.join(found_in)}")
+        checks = fact_checks(details, company_link, fca_frn)
+        st.dataframe(pd.DataFrame([{
+            "Fact": c.fact,
+            "Extracted": c.extracted or "—",
+            "Found in": ", ".join(c.found_in) or "—",
+            "Across documents": (("✅ " if c.consistent else "⚠️ ") + c.cross_check) if c.found_in else "—",
+            "External verification": ("✅ " if c.externally_verified else "○ ") + c.external,
+            "Assessment": c.assessment,
+        } for c in checks]), hide_index=True, height="content",
+            column_config={"Extracted": st.column_config.TextColumn(width="medium"),
+                           "Assessment": st.column_config.TextColumn(width="large")})
         named = people(details)
         if named:
             st.markdown("**People named**")
@@ -965,28 +1143,6 @@ if screen == "documents":
         navigation("Next", "identification" in st.session_state, save=save_labels)
         st.caption("Next: Clario suggests the industry and an initial risk rating.")
         st.stop()
-
-class NotSavedYet(Exception):
-    """A step that has no saved answer to replay."""
-
-
-class ReplayOnly:
-    """Stands in for the AI service when reopening a saved assessment: saved answers replay for free, and a step
-    with no saved answer stops here instead of calling the paid service."""
-
-    class _Messages:
-        def create(self, **_):
-            raise NotSavedYet
-
-    beta = type("Beta", (), {"messages": _Messages()})()
-
-
-def replay_only(step):
-    try:
-        return step()
-    except NotSavedYet:
-        return None
-
 
 # After a refresh, a later tab reloads the earlier tabs' results from their saved answers (free), so it opens directly
 LATER_SCREENS = ("assess", "results", "monitoring")
@@ -1248,6 +1404,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 checked = st.session_state.assessment[1]
                 log_event(audit_path, "Clario", f"Checked {len(documents)} documents against the "
                           f"{CHECKLISTS[checklist][0]} checklist" + ("" if checked.replayed else f" (AI usage ${checked.cost_usd:.3f})"))
+                st.rerun()  # once, so the workspace summary at the top shows the results (saved, so free)
             except ExtractionFailed as error:
                 st.error(f"Could not run the checks: {error}", icon=":material/error:")
                 st.button("Try again", icon=":material/refresh:")
@@ -1546,7 +1703,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                                                   validated, o.reviewer_note, comment), check_id)
         changed_by_you = {check_id for check_id, status, _, _ in touched if status is not shown[check_id].status}
         for o, comment, validated, upload, description in uploads_for:
-            document = UploadedDocument(upload.name, upload.getvalue(), upload.type or "application/pdf")
+            document = UploadedDocument(upload.name, upload.getvalue(), media_type_for(upload.name, upload.type),
+                                        synthetic=ASSESS_AS_TEST)
             verdict = None
             if o.status is not Status.PRESENT:  # Claude reads it against this one line
                 with st.spinner(f"Clario is reading {document.name} against check {o.check.id}..."):

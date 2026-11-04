@@ -148,7 +148,9 @@ def methodology_text(methodology: Methodology) -> str:
 
 # Documents that show who owns and runs the business and what it does; the others are not needed for the rating
 RISK_DOCUMENT_TYPES = {"onboarding_questionnaire", "register_of_shareholders", "register_of_directors",
-                       "ownership_chart", "identity_document", "board_resolution"}
+                       "ownership_chart", "identity_document", "board_resolution", "psc_register",
+                       "confirmation_statement", "company_register_profile", "regulatory_status",
+                       "financial_statements"}
 
 
 def suggest_risk(documents: list[UploadedDocument], labels: list[DocumentLabel], industry: str,

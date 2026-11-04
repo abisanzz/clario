@@ -44,7 +44,8 @@ def checklist_for(industry: str, rating: str = "Medium") -> tuple[str, bool]:
 
 
 # Document types that describe what the business does
-DESCRIBES_THE_BUSINESS = {"onboarding_questionnaire"}
+DESCRIBES_THE_BUSINESS = {"onboarding_questionnaire", "company_register_profile", "regulatory_status",
+                          "financial_statements"}
 
 INDUSTRY_SYSTEM = """You help a KYC (know your customer) analyst decide which industry a company is in, so the right checklist is used.
 Base the answer on what the company actually does, using every source: the industry (SIC) codes on the Companies House record, the client's own description in its questionnaire, its website, and any regulator details.
