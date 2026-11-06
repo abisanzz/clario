@@ -15,7 +15,6 @@ from services.documents import (
 )
 from services.companies_house import get_company
 from services.conversion import TEXT_TYPES, CannotRead, is_text_type, to_text
-from services.environment import SYNTHETIC_NOTE
 from services.extractor import (
     IMAGE_TYPES,
     ask_claude,
@@ -75,7 +74,6 @@ class UploadedDocument:
     data: bytes
     media_type: str = "application/pdf"
     description: str = ""  # what the analyst says the document shows (optional)
-    synthetic: bool = False  # part of a synthetic test assessment: assessed as genuine, test status kept apart
 
     @property
     def fingerprint(self) -> str:
@@ -160,7 +158,7 @@ IDENTIFY_SCHEMA = {
 def pack_fingerprint(documents: list[UploadedDocument]) -> str:
     """Changes if any file, file name or the order of files changes."""
     lines = "\n".join(f"{d.name}:{d.fingerprint}" + (f":{d.description}" if d.description else "")
-                      + (":synthetic" if d.synthetic else "") for d in documents)
+                      for d in documents)
     return hashlib.sha256(lines.encode()).hexdigest()
 
 
@@ -177,9 +175,8 @@ def text_block(document: UploadedDocument) -> dict:
 
 
 def numbered_files(documents: list[UploadedDocument]) -> list[dict]:
-    """Each file, introduced by its number and name, ready to send to Claude. For a synthetic test assessment, a note
-    first explains that test markings are provenance, so the substantive content is assessed as genuine evidence."""
-    content = [{"type": "text", "text": SYNTHETIC_NOTE}] if any(d.synthetic for d in documents) else []
+    """Each file, introduced by its number and name, ready to send to Claude."""
+    content = []
     for number, document in enumerate(documents, start=1):
         if document.media_type not in SUPPORTED_TYPES:
             raise UnsupportedFile(f"{document.name}: this type of file can't be read. Upload a PDF, image, Word, "

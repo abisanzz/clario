@@ -1,5 +1,4 @@
-from services.environment import LIVE, REAL, SYNTHETIC, SYNTHETIC_NOTE, TEST, metadata_of
-from services.pack import DocumentDetails, UploadedDocument, numbered_files, pack_fingerprint
+from services.pack import DocumentDetails
 from services.verification import NOT_VERIFIED, RegisterRecord, check_facts, companies_house_record
 
 STERLING = "Sterling Asset Management Limited"
@@ -56,19 +55,3 @@ def test_a_failed_or_missing_lookup_verifies_nothing():
     assert companies_house_record(None, not_found, not_found, not_found) is None
     assert companies_house_record("CLARIO-TEST-001", not_found, not_found, not_found) is None
 
-
-def test_synthetic_documents_are_read_as_genuine_and_kept_apart():
-    genuine = UploadedDocument("register.pdf", b"%PDF register")
-    synthetic = UploadedDocument("register.pdf", b"%PDF register", synthetic=True)
-    assert numbered_files([synthetic])[0] == {"type": "text", "text": SYNTHETIC_NOTE}
-    assert numbered_files([genuine])[0]["text"] == "File 1: register.pdf"  # live assessments are unchanged
-    assert pack_fingerprint([synthetic]) != pack_fingerprint([genuine])  # answers are never mixed up
-
-
-def test_the_test_environment_record():
-    assert metadata_of({"source": "Sample pack"}).synthetic  # the built-in example case is always test data
-    live = metadata_of({"source": "Upload documents"})
-    assert (live.environment, live.data_classification, live.synthetic) == (LIVE, REAL, False)
-    test = metadata_of({"source": "Upload documents", "customer_reference": "CLARIO-TEST-001", "environment": TEST,
-                        "data_classification": SYNTHETIC})
-    assert (test.customer_reference, test.environment, test.synthetic) == ("CLARIO-TEST-001", TEST, True)

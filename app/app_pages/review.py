@@ -63,6 +63,7 @@ from services.workflow import (  # noqa: E402
 )
 from services.audit import describe_line_change, events_csv, load_events, log_event  # noqa: E402
 from services.cases import (  # noqa: E402
+    CUSTOMER_TYPES,
     DETAIL_FIELDS,
     add_supporting_document,
     answer_paths,
@@ -87,16 +88,6 @@ from services.conversion import (  # noqa: E402
     to_text,
 )
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
-from services.environment import (  # noqa: E402
-    CLASSIFICATIONS,
-    CUSTOMER_TYPES,
-    ENVIRONMENTS,
-    LIVE,
-    REAL,
-    SYNTHETIC,
-    TEST,
-    metadata_of,
-)
 from services.verification import NOT_VERIFIED, check_facts, companies_house_record  # noqa: E402
 from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
@@ -450,7 +441,7 @@ def details_tab() -> None:
         reference_side, type_side = st.columns(2)
         customer_reference = reference_side.text_input(
             "Customer reference", value=saved.get("customer_reference", ""), key="customer_reference",
-            placeholder="e.g. CLARIO-TEST-001", help="Your firm's own reference for this customer.")
+            placeholder="e.g. CUST-00123", help="Your firm's own reference for this customer.")
         known_type = saved.get("customer_type") or CUSTOMER_TYPES[0]
         customer_type = type_side.selectbox("Customer type", CUSTOMER_TYPES, key="customer_type",
                                             index=CUSTOMER_TYPES.index(known_type) if known_type in CUSTOMER_TYPES
@@ -500,31 +491,10 @@ def details_tab() -> None:
                 ":material/lock: Documents are processed by Clario's AI service. Upload only documents your "
                 "data-handling policy permits.")
 
-    # The test-environment record: kept apart from the documents, never a document exception
-    with st.container(border=True):
-        st.markdown("**:material/science: Environment**")
-        if source == "Sample pack":
-            environment, data_classification = TEST, SYNTHETIC
-            st.caption("The example case is always **Test** data, classified **Synthetic**.")
-        else:
-            environment_side, classification_side = st.columns(2)
-            environment = environment_side.segmented_control(
-                "Environment", ENVIRONMENTS, default=saved.get("environment") or LIVE, key="environment",
-                help="Test: a test customer, e.g. for training or checking Clario. Live: a real onboarding.") or LIVE
-            data_classification = classification_side.segmented_control(
-                "Data classification", CLASSIFICATIONS, key="data_classification",
-                default=saved.get("data_classification") or (SYNTHETIC if environment == TEST else REAL),
-                help="Synthetic: fictional documents made for testing. Real: genuine customer documents."
-            ) or (SYNTHETIC if environment == TEST else REAL)
-        st.caption("Synthetic documents are assessed as if they were genuine customer evidence. Their test status is "
-                   "kept here, separately, and is never treated as a document exception. Nothing is described as "
-                   "externally verified unless a live Companies House or FCA register check confirms it.")
-
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
                "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
                "stated_industry": stated_industry, "owner": owner.strip(),
-               "customer_reference": customer_reference.strip(), "customer_type": customer_type,
-               "environment": environment, "data_classification": data_classification}
+               "customer_reference": customer_reference.strip(), "customer_type": customer_type}
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:", disabled=not owner.strip()):
             save_draft(details, documents)
@@ -649,10 +619,6 @@ if not saved:  # a new assessment: only the details tab can be used until it is 
 source = saved["source"]
 entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
 documents = (SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]) + saved.get("supporting", [])
-test_record = metadata_of(saved)
-ASSESS_AS_TEST = test_record.synthetic and source != "Sample pack"  # the example case keeps its saved answers
-if ASSESS_AS_TEST:
-    documents = [replace(d, synthetic=True) for d in documents]
 saved_answers = SAMPLE_ANSWERS if source == "Sample pack" else answer_paths(st.session_state.case_id)
 
 
@@ -857,7 +823,7 @@ def show_workspace() -> None:
     discrepancies = [c.fact for c in checks if not c.consistent]
     to_resolve = lines_to_resolve()
     tiles = [
-        ("Customer reference", test_record.customer_reference or "Not set", ""),
+        ("Customer reference", saved.get("customer_reference") or "Not set", ""),
         ("Customer type", saved.get("customer_type") or "Not set", ""),
         ("KYC status", current.status if current else "Draft", ""),
         ("Documents received", str(len(documents)), f"{len(stored_supporting)} supporting" if stored_supporting else ""),
@@ -878,11 +844,6 @@ def show_workspace() -> None:
                 st.markdown(f"**{value}**")
                 if note:
                     st.caption(note)
-    if test_record.environment == TEST or test_record.synthetic:
-        st.info(f"**Test environment** · Customer reference: {test_record.customer_reference or 'not set'} · "
-                f"Environment: {test_record.environment} · Data classification: {test_record.data_classification} · "
-                f"External verification: {f'{verified} of {len(checks)} facts' if verified else NOT_VERIFIED}. "
-                "Test data is assessed as genuine evidence; this record is kept separately.", icon=":material/science:")
 
 
 if st.session_state.get("case_id"):
@@ -1703,8 +1664,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                                                   validated, o.reviewer_note, comment), check_id)
         changed_by_you = {check_id for check_id, status, _, _ in touched if status is not shown[check_id].status}
         for o, comment, validated, upload, description in uploads_for:
-            document = UploadedDocument(upload.name, upload.getvalue(), media_type_for(upload.name, upload.type),
-                                        synthetic=ASSESS_AS_TEST)
+            document = UploadedDocument(upload.name, upload.getvalue(), media_type_for(upload.name, upload.type))
             verdict = None
             if o.status is not Status.PRESENT:  # Claude reads it against this one line
                 with st.spinner(f"Clario is reading {document.name} against check {o.check.id}..."):
