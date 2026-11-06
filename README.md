@@ -11,7 +11,7 @@ Clario is an internal workspace for a KYC (know your customer) team onboarding U
 3. **Risk assessment.** Clario suggests the industry and an initial risk rating (Low, Medium or High) from the ownership and business documents and the registers, against a risk methodology, and flags enhanced due diligence triggers. The analyst confirms or overrides; an override needs a reason, sign-off from an AML senior officer and evidence. The industry and rating pick the checklist: simplified, standard or enhanced due diligence.
 4. **Evidence review.** Every checklist line shows its status (Present, Missing, Unclear, Needs human review, Not started), the finding, the evidence quoted with document and page, and who decided it. The analyst validates line by line, changes a status with a comment, or uploads a supporting document, which Clario reads against that line. The "request from client" and "check on public registers" lists are built automatically.
 5. **Submit and approve.** Once every line is Present and validated, the analyst submits the review; only then can senior management approve or reject it. Approval freezes the checklist, with a copy of every document used.
-6. **Ongoing monitoring.** The next review date follows the risk rating (1, 2 or 3 years). A periodic review starts from the approved checklist with every line to be validated again, has its own ID linked to the original (e.g. `CLR-9580685D-PR1`), and goes through submission and approval in turn. Every approved review stays in the review history.
+6. **Ongoing monitoring.** The next review date follows the risk rating (1, 2 or 3 years). A periodic review runs the checklist again as at its start date, flags any evidence that is out of date and no longer valid, and shows what was approved last time beside every line, each of which must be validated again. It has its own ID linked to the original (e.g. `CLR-9580685D-PR1`), and goes through submission and approval in turn. Every approved review stays in the review history.
 
 Every change, by a person or by Clario, is recorded in the assessment's audit history.
 
@@ -43,7 +43,7 @@ Company website ──────────┘  Claude: evidence for every ch
                                           │
           analyst validates every line  →  submits  →  senior management approves  →  frozen record
                                           │
-                          next review date  →  periodic review from the approved checklist
+                          next review date  →  periodic review: checklist runs again, out-of-date evidence flagged
 ```
 
 - **AI where judgement is needed, rules where it isn't.** Claude reads documents and maps evidence. Deterministic Python rules check the entity name against Companies House, the company number and its live status, document dates, the age of proof of address, and how the risk factors combine (any enhanced due diligence trigger means High, otherwise the highest factor wins). Comparing facts across documents is a rule too.

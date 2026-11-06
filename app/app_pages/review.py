@@ -31,9 +31,10 @@ from services.overview import summarise  # noqa: E402
 from services.cycles import (  # noqa: E402
     approved_document,
     approved_snapshots,
+    assessment_answer_path,
     attach_documents,
-    carry_forward,
     cycle_review_id,
+    cycle_started_on,
     copy_file,
     current_cycle,
     cycle_key,
@@ -1296,25 +1297,33 @@ suggestion = st.session_state.industry[1]
 industry, checklist = st.session_state.choice
 
 with open_tab:  # Evidence review, or Ongoing monitoring: both work from the checked results
-    # Results no longer match if the labels or the checklist changed
-    if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist):
+    # Results no longer match if the labels, the checklist or the review cycle changed
+    if st.session_state.get("assessment") and st.session_state.assessment[0] != (confirmed, checklist, cycle):
         st.session_state.pop("assessment")
+    # A periodic review checks the documents again as at the date it started, so out-of-date evidence is flagged
+    review_date = cycle_started_on(review_key) if cycle > 1 else None
 
     # --- Screen 5: results. The checks run as this screen opens, then the results appear ---
 
     if "assessment" not in st.session_state:
         replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
+        if review_date:
+            answer_path = assessment_answer_path(review_key, cycle)
+        else:
+            answer_path = saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None
         sources, _ = fetch_links(company_link, website, fca_frn)
         with st.spinner(f"Clario is checking the {len(documents)} documents against every item on the "
                         f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
             try:
-                st.session_state.assessment = ((confirmed, checklist), assess_pack(
-                    documents, confirmed, sources, checklist=CHECKLISTS[checklist][1],
-                    saved_answer=saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None,
+                st.session_state.assessment = ((confirmed, checklist, cycle), assess_pack(
+                    documents, confirmed, sources, checklist=CHECKLISTS[checklist][1], saved_answer=answer_path,
+                    review_date=review_date,
                 ))
                 checked = st.session_state.assessment[1]
                 log_event(audit_path, "Clario", f"Checked {len(documents)} documents against the "
-                          f"{CHECKLISTS[checklist][0]} checklist" + ("" if checked.replayed else f" (AI usage ${checked.cost_usd:.3f})"))
+                          f"{CHECKLISTS[checklist][0]} checklist"
+                          + (f" as at {review_date:%d %b %Y} for {cycle_name(cycle).lower()}" if review_date else "")
+                          + ("" if checked.replayed else f" (AI usage ${checked.cost_usd:.3f})"))
                 st.rerun()  # once, so the workspace summary at the top shows the results (saved, so free)
             except ExtractionFailed as error:
                 st.error(f"Could not run the checks: {error}", icon=":material/error:")
@@ -1564,7 +1573,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         sources, _ = fetch_links(company_link, website, fca_frn)
         with st.spinner(f"Clario is re-checking {section} with {len(documents) + len(extra_docs)} documents..."):
             partial = assess_pack(documents + extra_docs, confirmed + extra_labels, sources,
-                                  checklist=CHECKLISTS[checklist][1], only=check_ids)
+                                  checklist=CHECKLISTS[checklist][1], only=check_ids, review_date=review_date)
         new_lines = {o.check.id: o for o in partial.outcomes}
         key, current = st.session_state.assessment
         st.session_state.assessment = (key, replace(
@@ -1650,6 +1659,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
 
 
     lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
+    earlier = load_snapshot(review_key, cycle - 1) if cycle > 1 else None
+    last_approved = {line.id: line for line in earlier.lines} if earlier else {}
 
 
     def render_line(o) -> None:
@@ -1668,6 +1679,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         with st.container(border=True):
             text_side, status_side, tick_side = st.columns([5, 2, 1], vertical_alignment="center")
             text_side.markdown(f"**{o.check.id}** {o.check.check}")
+            if o.check.id in last_approved:
+                before = last_approved[o.check.id]
+                text_side.caption(f":material/history: Last approved on {earlier.approved_on}: **{before.status}**"
+                                  + (f" · {before.comment}" if before.comment else ""))
             status = STATUS_FROM_TEXT[status_side.selectbox(
                 "Status", list(STATUS_TEXT.values()), key=widgets["status"], label_visibility="collapsed",
                 **starting("status", {"index": list(STATUS_TEXT).index(o.status)}))]
@@ -1761,9 +1776,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         with st.container(border=True):
             st.subheader(":material/autorenew: Periodic review")
             if approval:
-                st.caption(f"Starts the next review from the checklist approved on {last.approved_on}. Every line "
-                           "keeps its approved status and comment with **Validated** cleared, so you check each one "
-                           "again and add any new documents, then submit it for approval.")
+                st.caption(f"Clario runs the checklist again as at today and flags any evidence that is out of date "
+                           f"and no longer valid. Every line starts without **Validated**, so you check each one again, "
+                           f"with what was approved on {last.approved_on} shown beside it, add any new documents, then "
+                           "submit it for approval. The documents, industry and risk rating carry over.")
                 who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="periodic_who",
                                     width=300)
                 if st.button("Start periodic review", type="primary", icon=":material/play_arrow:",
@@ -1771,10 +1787,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     new_cycle = start_periodic_review(review_key)
                     new_key = cycle_key(review_key, new_cycle)
                     copy_file(decision_path, case_file(new_key, "risk-decision"))
-                    carry_forward(snapshot, named, case_file(new_key, checklist), who)
-                    log_event(audit_path, who, f"Started {cycle_name(new_cycle).lower()} from the checklist approved "
-                              f"on {last.approved_on}; every line to be validated again")
+                    log_event(audit_path, who, f"Started {cycle_name(new_cycle).lower()}; the checklist runs again and "
+                              "every line is to be validated again")
                     st.session_state.last_reviewer = who.strip()
+                    st.session_state.pop("assessment", None)
                     go("results")
             else:
                 st.info(f"**{cycle_name(cycle)}** is in progress. Validate every line in **Evidence review**, then "

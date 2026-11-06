@@ -7,11 +7,12 @@ from services.cases import new_case_id, save_case, save_progress
 from services.checklist import CHECKLISTS, load_checks
 from services.cycles import (
     approved_snapshots,
-    carry_forward,
+    assessment_answer_path,
     copy_file,
     current_cycle,
     cycle_key,
     cycle_review_id,
+    cycle_started_on,
     freeze,
     load_snapshot,
     load_submission,
@@ -79,16 +80,14 @@ def test_the_checklist_is_frozen_at_approval(folders, tmp_path):
     assert load_snapshot("case", 1, folders) is None
 
 
-def test_a_periodic_review_starts_from_the_approved_lines_with_ticks_cleared(folders, tmp_path):
-    first, second = tmp_path / "first.json", tmp_path / "second.json"
-    lines = [(c.id, Status.PRESENT, "Client sent it" if i == 0 else "", True) for i, c in enumerate(CHECKS)]
-    save_line_reviews(first, checks_found(), lines, "A. Analyst", TODAY)
-    snapshot = freeze("case", 1, apply_overrides(checks_found(), load_overrides(first)), "C. Head", "2026-11-01", "",
-                      "payments", "fintech_high", {"rating": "High"}, [], folders)
-    assert carry_forward(snapshot, checks_found(), second, "A. Analyst") == 1  # only line 1 differs from the checks
-    carried = apply_overrides(checks_found(), load_overrides(second))
-    assert all(o.status is Status.PRESENT for o in carried.outcomes)  # as approved
-    assert not any(o.validated_by for o in carried.outcomes)  # every line to be checked again
+def test_a_periodic_review_runs_the_checks_again_with_every_line_unvalidated(folders, tmp_path):
+    assert cycle_started_on("case", folders) is None  # onboarding: the checks run as usual
+    start_periodic_review("case", folders, today=TODAY)
+    assert cycle_started_on("case", folders) == TODAY  # the date the checks are judged at
+    assert assessment_answer_path("case", 2, folders) == folders / "case" / "assessment-cycle-2.answer.json"
+    # Nothing is carried into the new cycle's line reviews, so every line starts without a Validated tick
+    lines = load_overrides(case_file(cycle_key("case", 2), "fintech_high"))
+    assert not any(o.validated_by for o in apply_overrides(checks_found(), lines).outcomes)
     copy_file(tmp_path / "missing.json", tmp_path / "copy.json")  # nothing to copy is fine
     assert not (tmp_path / "copy.json").exists()
 

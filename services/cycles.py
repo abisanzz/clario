@@ -1,9 +1,10 @@
 """Review cycles: onboarding is cycle 1, each periodic review is the next cycle.
 
 Each cycle has its own line reviews, risk decision, submission and approval. At approval the whole checklist is
-frozen into a snapshot, so anyone can see exactly what was present at that point. A periodic review starts from the
-last approved checklist with every Validated tick cleared, so the analyst re-checks each line before it is submitted
-for approval again. Files live in the review's folder in the git-ignored cases folder.
+frozen into a snapshot, so anyone can see exactly what was present at that point. A periodic review runs the
+checklist again as at the date it started, so evidence that has gone out of date is flagged, and every line starts
+without a Validated tick, so the analyst checks each one again before it is submitted for approval. Files live in the
+review's folder in the git-ignored cases folder.
 """
 
 import json
@@ -15,7 +16,6 @@ from pathlib import Path
 from services.cases import CASES_DIR, review_id
 from services.checklist import Check
 from services.pack import CheckOutcome, PackAssessment, UploadedDocument
-from services.reviews import save_override
 from services.validator import Status
 
 
@@ -47,6 +47,17 @@ def start_periodic_review(case_id: str, folder: Path | None = None, today: date 
     (path / "cycle.json").write_text(json.dumps({"cycle": cycle,
                                                   "started_on": (today or date.today()).isoformat()}, indent=2))
     return cycle
+
+
+def cycle_started_on(case_id: str, folder: Path | None = None) -> date | None:
+    """The date the current periodic review started; None during onboarding."""
+    path = _folder(case_id, folder) / "cycle.json"
+    return date.fromisoformat(json.loads(path.read_text())["started_on"]) if path.exists() else None
+
+
+def assessment_answer_path(case_id: str, cycle: int, folder: Path | None = None) -> Path:
+    """Where a periodic review keeps Claude's answer for its checklist run, so reopening it costs nothing."""
+    return _folder(case_id, folder) / f"assessment-cycle-{cycle}.answer.json"
 
 
 # --- Submission for approval ---
@@ -195,23 +206,6 @@ def approved_snapshots(case_id: str, folder: Path | None = None) -> list[Snapsho
     """Every approved cycle, most recent first."""
     found = [load_snapshot(case_id, cycle, folder) for cycle in range(1, current_cycle(case_id, folder) + 1)]
     return [s for s in reversed(found) if s]
-
-
-def carry_forward(previous: Snapshot, assessment: PackAssessment, lines_path: Path, reviewer: str,
-                  today: date | None = None) -> int:
-    """The starting point of a periodic review: each line as last approved, saved as the new cycle's line reviews with
-    its Validated tick cleared, so the analyst checks every line again. `assessment` is the checks before anyone's
-    changes. Returns how many lines were carried forward with a status or comment of their own."""
-    approved = {line.id: line for line in previous.lines}
-    carried = 0
-    for o in assessment.outcomes:
-        line = approved.get(o.check.id)
-        if not line or (line.status == o.status.value and not line.comment):
-            continue  # nothing to carry: the line shows as the checks found it
-        note = line.comment or f"As approved on {previous.approved_on}"
-        save_override(lines_path, assessment, o.check.id, Status(line.status), note, reviewer or "Clario", today)
-        carried += 1
-    return carried
 
 
 def copy_file(source: Path, destination: Path) -> None:

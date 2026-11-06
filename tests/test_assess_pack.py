@@ -326,3 +326,17 @@ def test_a_section_can_be_re_run_on_its_own():
     assert {o.check.id for o in result.outcomes} == section_3
     text = claude.requests[0]["messages"][0]["content"][-1]["text"]
     assert "3.1 [3. Ownership and control]" in text and "5.1 [5." not in text
+
+
+def test_a_periodic_review_judges_the_evidence_as_at_its_date(tmp_path):
+    saved = tmp_path / "assessment.json"
+    _, onboarding = run(saved_answer=saved)
+    assert "periodic review" not in onboarding.requests[0]["messages"][0]["content"][-1]["text"]
+
+    periodic, claude = run(saved_answer=saved, review_date=date(2027, 11, 2))
+    assert not periodic.replayed and len(claude.requests) == 1  # the onboarding answer is not reused
+    text = claude.requests[0]["messages"][0]["content"][-1]["text"]
+    assert "This is a periodic review on 02 November 2027" in text and '"Out of date:"' in text
+
+    again, claude = run(saved_answer=saved, review_date=date(2027, 11, 2))
+    assert again.replayed and claude.requests == []  # reopening the same periodic review is free
