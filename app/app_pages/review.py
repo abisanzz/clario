@@ -1488,9 +1488,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                else "Submit for approval at the end of this page")
         if cycle > 1 and history:
             with st.container(border=True):
-                st.markdown(f"**:material/autorenew: {cycle_name(cycle)}** started from the checklist approved on "
-                            f"{history[0].approved_on} by {history[0].approved_by}. Each line keeps its approved status "
-                            "and comment; validate every line again, then submit for approval.")
+                st.markdown(f"**:material/autorenew: {cycle_name(cycle)}**: the checklist was run again as at "
+                            f"{review_date:%d %b %Y}, so evidence that is out of date is flagged. Each line shows what "
+                            f"was approved on {history[0].approved_on} by {history[0].approved_by}; validate every line "
+                            "again, then submit for approval.")
         # --- What to chase: requests to the client and checks on public registers ---
 
         left, right = st.columns(2)

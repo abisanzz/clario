@@ -6,7 +6,7 @@ Clario is an internal workspace for a KYC (know your customer) team onboarding U
 
 ## The workflow
 
-1. **Details and documents.** The legal entity's name, country of incorporation, Companies House number, FCA firm reference number and website, and its documents: PDFs, Word, Excel, CSV, text files, emails, web pages or photos. The name is checked against Companies House as you type. Non-UK entities skip the UK register checks.
+1. **Details and documents.** The legal entity's name, country of incorporation, Companies House number, FCA firm reference number and website, the firm's own customer reference and the customer type, and its documents: PDFs, Word, Excel, CSV, text files, emails, web pages or photos. The name is checked against Companies House as you type. Non-UK entities skip the UK register checks.
 2. **Document intelligence.** Clario identifies each document (certificate of incorporation, register of members, proof of address and so on) and extracts the company name, registration number, registered address, dates, people and owners from each one. It compares them across documents and flags where they disagree. The analyst corrects any document type, with a comment.
 3. **Risk assessment.** Clario suggests the industry and an initial risk rating (Low, Medium or High) from the ownership and business documents and the registers, against a risk methodology, and flags enhanced due diligence triggers. The analyst confirms or overrides; an override needs a reason, sign-off from an AML senior officer and evidence. The industry and rating pick the checklist: simplified, standard or enhanced due diligence.
 4. **Evidence review.** Every checklist line shows its status (Present, Missing, Unclear, Needs human review, Not started), the finding, the evidence quoted with document and page, and who decided it. The analyst validates line by line, changes a status with a comment, or uploads a supporting document, which Clario reads against that line. The "request from client" and "check on public registers" lists are built automatically.
@@ -15,7 +15,7 @@ Clario is an internal workspace for a KYC (know your customer) team onboarding U
 
 Every change, by a person or by Clario, is recorded in the assessment's audit history.
 
-![Evidence review: the action-required lists, status tiles that filter the checklist, and line-by-line validation](docs/screenshots/evidence-review.png)
+![Evidence review during a periodic review: the action-required lists, status tiles that filter the checklist, and each line to validate again beside what was last approved](docs/screenshots/evidence-review.png)
 
 ## What it catches
 
@@ -29,7 +29,7 @@ The example case is a fictitious company, EXAMPLE PAYMENTS LTD, with problems pl
 | No ownership structure chart | **3.1 Missing**, added to the "request from client" list |
 | One director has no identity check | **4.2 Needs human review** |
 
-![Document intelligence: each document's type and the key facts compared across documents](docs/screenshots/document-intelligence.png)
+![Document intelligence: the key facts compared across documents, with the shareholding mismatch flagged](docs/screenshots/document-intelligence.png)
 
 ## How it works
 
@@ -70,8 +70,9 @@ Company website ──────────┘  Claude: evidence for every ch
 | Suggest the initial risk rating | about $0.10 |
 | Check the pack against the checklist | about $0.21 |
 | **Total** | **about $0.45 (roughly 36p)** |
+| Each periodic review: check the pack against the checklist again | about $0.10 to $0.20 |
 
-Companies House and FCA register lookups are free. The example case replays saved answers and costs nothing.
+Companies House and FCA register lookups are free. The example case replays saved answers and costs nothing until a periodic review of it runs the checklist again; that answer is then saved too.
 
 ![Ongoing monitoring: next review date, periodic review and the frozen review history](docs/screenshots/ongoing-monitoring.png)
 
@@ -86,7 +87,7 @@ cp .env.example .env          # then open .env and fill in your keys
 .venv/bin/streamlit run app/main.py
 ```
 
-Sign in as any of the demo team members, start a new assessment and choose **Example case**. It needs the Companies House and FCA keys (both free) but no Anthropic key, because the AI answers for it are saved. To run the tests (they never go online or spend money):
+Sign in as any of the demo team members, start a new assessment and choose **Example case**. It needs the Companies House and FCA keys (both free) but no Anthropic key, because the AI answers for it are saved; only a periodic review of it needs one. To run the tests (they never go online or spend money):
 
 ```bash
 .venv/bin/python -m pytest
@@ -103,7 +104,9 @@ Sign in as any of the demo team members, start a new assessment and choose **Exa
 | `app/app_pages/review.py` | An assessment: details, document intelligence, risk, evidence review, monitoring and audit tabs |
 | `app/app_pages/home.py` | About Clario |
 | `services/pack.py` | Document identification, fact extraction and evidence mapping for the checklist |
-| `services/intelligence.py` | Key facts compared across documents |
+| `services/conversion.py` | Word, Excel, CSV, text, email and web page files turned into text for Claude to read |
+| `services/intelligence.py`, `services/verification.py` | Key facts compared across documents, kept apart from verification against the live registers |
+| `services/supporting.py` | A supporting document read against the one checklist line it was added for |
 | `services/industry.py`, `services/risk.py` | Industry suggestion, and the risk methodology, factor ratings and rules |
 | `services/validator.py` | Fixed rules for the legal-existence checks |
 | `services/reviews.py` | Line reviews, overrides and final approval |
@@ -111,6 +114,7 @@ Sign in as any of the demo team members, start a new assessment and choose **Exa
 | `services/overview.py` | Summaries for the dashboard and the assessments list |
 | `services/cases.py`, `services/audit.py` | Saved assessments, supporting documents and the audit log |
 | `services/companies_house.py`, `services/fca.py`, `services/website.py` | Live sources |
+| `services/countries.py` | Countries of incorporation; the UK register checks run only for UK companies |
 | `services/extractor.py` | Calls to Claude, saved answers and cost |
 | `docs/*.xlsx` | The 18 checklists and the risk methodology |
 | `sample_documents/` | The fictitious example case and its saved answers |
