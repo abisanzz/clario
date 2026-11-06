@@ -88,7 +88,7 @@ from services.conversion import (  # noqa: E402
     to_text,
 )
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
-from services.verification import NOT_VERIFIED, check_facts, companies_house_record  # noqa: E402
+from services.verification import check_facts, companies_house_record  # noqa: E402
 from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
@@ -798,56 +798,6 @@ def replay_only(step):
     except NotSavedYet:
         return None
 
-
-def lines_to_resolve() -> int | None:
-    """Checklist lines (sections 1 to 6) that are Missing, Unclear or need human review, once the checks have run."""
-    if not st.session_state.get("assessment") or not st.session_state.get("choice"):
-        return None
-    checked = apply_overrides(st.session_state.assessment[1],
-                              load_overrides(case_file(cycle_review_key, st.session_state.choice[1])))
-    return sum(o.status in (Status.MISSING, Status.UNCLEAR, Status.NEEDS_HUMAN_REVIEW) for o in checked.outcomes
-               if not o.check.section.startswith(("7.", "8.")))
-
-
-def show_workspace() -> None:
-    """The customer at a glance: who they are, where the assessment stands, and what is extracted versus verified."""
-    if "identification" not in st.session_state and st.session_state.get("labels"):  # reopened: replay, free
-        restored = replay_only(lambda: identify_documents(documents, saved_answer=saved_answers.get("labels"),
-                                                          client=ReplayOnly()))
-        if restored:
-            st.session_state.identification = restored
-    identified = st.session_state.get("identification")
-    extracted = identified.details if identified and identified.extracted else {}
-    checks = fact_checks(extracted, company_link, fca_frn) if extracted else []
-    verified = sum(c.externally_verified for c in checks)
-    discrepancies = [c.fact for c in checks if not c.consistent]
-    to_resolve = lines_to_resolve()
-    tiles = [
-        ("Customer reference", saved.get("customer_reference") or "Not set", ""),
-        ("Customer type", saved.get("customer_type") or "Not set", ""),
-        ("KYC status", current.status if current else "Draft", ""),
-        ("Documents received", str(len(documents)), f"{len(stored_supporting)} supporting" if stored_supporting else ""),
-        ("Extraction", f"{len(extracted)} of {len(documents)} documents" if identified and identified.extracted
-         else "Not run yet", "Key facts read from the documents" if extracted else "Opens on Document intelligence"),
-        ("Verification", (f"{verified} of {len(checks)} facts" if verified else NOT_VERIFIED) if checks
-         else "Not run yet", "Checked against live registers" if verified else "No live register check confirmed a fact"
-         if checks else ""),
-        ("Outstanding evidence", f"{to_resolve} lines" if to_resolve is not None else "Checks not run",
-         "Missing, unclear or needing review" if to_resolve is not None else "Opens on Evidence review"),
-        ("Discrepancies", str(len(discrepancies)) if checks else "Not run yet",
-         ", ".join(discrepancies) if discrepancies else ("Documents agree" if checks else "")),
-    ]
-    with st.container(horizontal=True, wrap=True):
-        for label, value, note in tiles:
-            with st.container(border=True, width=210, height=112, gap=None):
-                st.caption(label)
-                st.markdown(f"**{value}**")
-                if note:
-                    st.caption(note)
-
-
-if st.session_state.get("case_id"):
-    show_workspace()
 
 with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)})", icon=":material/folder_open:"):
     rows = [(d, None) for d in original_documents] + list(stored_supporting)
