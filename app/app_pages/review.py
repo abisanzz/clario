@@ -1820,20 +1820,22 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                             + (f" · **Validated by:** {o.validated_by}" if o.validated_by else "")
                             + (f"\n- **Before the change:** {product_voice(o.before_review)}" if o.before_review
                                else ""))
-                st.markdown("**:material/description: Extracted from the documents**")
-                if not documents_said:
-                    st.caption("Nothing was found in the documents for this line.")
-                for number, (label, value, sources, disagree) in enumerate(documents_said):
-                    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-                        shown = f"“{as_written(value)}”" if label == "Quoted" else f"**{as_written(value)}**"
-                        st.markdown((":orange[:material/warning:] " if disagree else "")
-                                    + f"{as_written(label)}: {shown}"
-                                    + (" · :orange[documents disagree]" if disagree else ""), width="stretch")
-                        count = len({without_page(source) for source in sources})
-                        with st.popover(f"{count} document{'s' if count > 1 else ''}", type="tertiary",
-                                        icon=":material/find_in_page:", help="Where this was found",
-                                        key=f"where_{key}_{number}"):
-                            st.markdown("\n".join(f"- {as_written(source)}" for source in sources))
+                # Its own fold-out, open to start with, so the analyst can minimise a long list
+                with st.expander(f"**Extracted from the documents** ({len(documents_said)})",
+                                 icon=":material/description:", expanded=True, key=f"extracted_{key}"):
+                    if not documents_said:
+                        st.caption("Nothing was found in the documents for this line.")
+                    for number, (label, value, sources, disagree) in enumerate(documents_said):
+                        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                            shown = f"“{as_written(value)}”" if label == "Quoted" else f"**{as_written(value)}**"
+                            st.markdown((":orange[:material/warning:] " if disagree else "")
+                                        + f"{as_written(label)}: {shown}"
+                                        + (" · :orange[documents disagree]" if disagree else ""), width="stretch")
+                            count = len({without_page(source) for source in sources})
+                            with st.popover(f"{count} document{'s' if count > 1 else ''}", type="tertiary",
+                                            icon=":material/find_in_page:", help="Where this was found",
+                                            key=f"where_{key}_{number}"):
+                                st.markdown("\n".join(f"- {as_written(source)}" for source in sources))
                 if registers_said:
                     st.markdown("**:material/account_balance: From the public registers and website**")
                     st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
