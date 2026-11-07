@@ -3,6 +3,7 @@
 Opened from the menu in app/main.py. Run from the project folder:  .venv/bin/streamlit run app/main.py
 """
 
+import re
 import sys
 from dataclasses import asdict, replace
 from datetime import date
@@ -906,6 +907,17 @@ def detail_lines(found) -> list[str]:
     return lines
 
 
+def as_written(text: str) -> str:
+    """Text from a document, shown exactly as printed: a table reads Markdown, so its symbols are escaped."""
+    return re.sub(r"([\\`*_{}\[\]<>()#+\-.!|~$:])", r"\\\1", text)
+
+
+def fit_table(rows: list[dict]) -> None:
+    """A small read-only table that wraps long text to fit the page, each cell shown as written."""
+    st.table(pd.DataFrame([{column: as_written(str(value)) for column, value in row.items()} for row in rows]),
+             hide_index=True, border="horizontal")
+
+
 def show_key_facts(identification) -> None:
     """The details from every document side by side, with what they disagree on flagged."""
     with st.container(border=True):
@@ -944,31 +956,30 @@ def show_key_facts(identification) -> None:
                     f"- {value}: {', '.join(found_in)}" for value, found_in in fact.values.items()),
                     icon=":material/warning:")
         checks = fact_checks(details, company_link, fca_frn)
-        st.dataframe(pd.DataFrame([{
+        # Plain tables wrap long text, so every column fits the page (a dataframe keeps each cell on one line)
+        fit_table([{
             "Fact": c.fact,
             "Extracted": c.extracted or "—",
             "Found in": ", ".join(c.found_in) or "—",
             "Across documents": (("✅ " if c.consistent else "⚠️ ") + c.cross_check) if c.found_in else "—",
             "External verification": ("✅ " if c.externally_verified else "○ ") + c.external,
             "Assessment": c.assessment,
-        } for c in checks]), hide_index=True, height="content",
-            column_config={"Extracted": st.column_config.TextColumn(width="medium"),
-                           "Assessment": st.column_config.TextColumn(width="large")})
+        } for c in checks])
         named = people(details)
         if named:
             st.markdown("**People named**")
-            st.dataframe(pd.DataFrame([{"Name": name, "Roles": ", ".join(roles), "Found in": ", ".join(found_in)}
-                                       for name, roles, found_in in named]), hide_index=True, height="content")
+            fit_table([{"Name": name, "Roles": ", ".join(roles), "Found in": ", ".join(found_in)}
+                       for name, roles, found_in in named])
         owned = owners(details)
         if owned:
             st.markdown("**Ownership**")
-            st.dataframe(pd.DataFrame([{
+            fit_table([{
                 "Owner": name,
                 "Share": " / ".join(shares),
                 "Found in": "; ".join(f"{share}: {', '.join(found_in)}" if len(shares) > 1 else ", ".join(found_in)
                                       for share, found_in in shares.items()),
                 "Check": "Documents disagree" if len(shares) > 1 else "",
-            } for name, shares in owned]), hide_index=True, height="content")
+            } for name, shares in owned])
 
 
 
