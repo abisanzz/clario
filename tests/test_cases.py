@@ -185,6 +185,27 @@ def test_a_supporting_document_can_be_deleted(tmp_path):
     assert (tmp_path / case_id / "documents" / CERT.fingerprint).exists()  # the original documents stay
 
 
+def test_documents_can_be_added_to_the_review_as_a_whole(tmp_path):
+    from services.cases import add_documents, load_supporting
+    case_id = new_case_id()
+    save_case(case_id, DETAILS, [CERT], folder=tmp_path)
+    assert add_documents(case_id, [BILL, PHOTO], {"cert.pdf"}, "A. Analyst", "Utility bill and ID",
+                         folder=tmp_path) == []
+    added = load_supporting(case_id, folder=tmp_path)
+    assert [document.name for document, _ in added] == ["bill.pdf", "passport.jpg"]
+    assert all(record["check_id"] == "" for _, record in added)  # not tied to one checklist line
+    assert (added[0][1]["added_by"], added[0][1]["description"]) == ("A. Analyst", "Utility bill and ID")
+
+
+def test_a_document_named_like_one_in_the_review_is_refused_and_nothing_is_added(tmp_path):
+    from services.cases import add_documents, load_supporting
+    case_id = new_case_id()
+    save_case(case_id, DETAILS, [CERT], folder=tmp_path)
+    another_cert = UploadedDocument("cert.pdf", b"%PDF a different certificate")
+    assert add_documents(case_id, [BILL, another_cert], {"cert.pdf"}, folder=tmp_path) == ["cert.pdf"]
+    assert load_supporting(case_id, folder=tmp_path) == []  # not even the bill
+
+
 def test_document_comments_are_kept_with_the_draft(tmp_path):
     from services.cases import load_progress, save_progress
     case_id = new_case_id()

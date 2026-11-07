@@ -230,6 +230,18 @@ def load_supporting(case_id: str, folder: Path | None = None) -> list[tuple[Uplo
             for s in record.get("supporting", [])]
 
 
+def add_documents(case_id: str, documents: list[UploadedDocument], names_in_review: set[str], added_by: str = "",
+                  description: str = "", folder: Path | None = None) -> list[str]:
+    """Add documents to the review as a whole, not for one checklist line (they are listed as "Added to the
+    review"). A name already in the review is refused rather than replacing that document: the names refused are
+    returned, and then nothing is added."""
+    taken = [document.name for document in documents if document.name in names_in_review]
+    if not taken:
+        for document in documents:
+            add_supporting_document(case_id, document, "", added_by, folder, description=description)
+    return taken
+
+
 def remove_supporting_document(case_id: str, sha256: str, folder: Path | None = None) -> None:
     """Delete a supporting document from the review's document store."""
     path = _folder(case_id, folder)

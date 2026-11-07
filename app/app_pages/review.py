@@ -66,6 +66,7 @@ from services.workflow import (  # noqa: E402
 from services.audit import describe_line_change, events_csv, load_events, log_event  # noqa: E402
 from services.cases import (  # noqa: E402
     DETAIL_FIELDS,
+    add_documents,
     add_supporting_document,
     answer_paths,
     load_supporting,
@@ -91,6 +92,7 @@ from services.conversion import (  # noqa: E402
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
 from services.verification import check_facts, companies_house_record  # noqa: E402
 from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
+from services.information import Row, from_documents_and_registers, provided_by_analyst, without_page  # noqa: E402
 from services.industry import INDUSTRIES, SOURCES_AGREE, checklist_for, suggest_industry  # noqa: E402
 from services.pack import (  # noqa: E402
     DOCUMENT_TYPES,
@@ -866,17 +868,15 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
                                         placeholder="e.g. Updated register of members, dated 20 Oct 2026",
                                         help="Saved with the documents and shown in the list above.")
         if st.button("Add and re-read the documents", icon=":material/note_add:", disabled=not new_files):
-            taken = [f.name for f in new_files if f.name in {document.name for document, _ in rows}]
+            who = st.session_state.get("last_reviewer", "")
+            taken = add_documents(st.session_state.case_id,
+                                  [UploadedDocument(f.name, f.getvalue(), media_type_for(f.name, f.type))
+                                   for f in new_files],
+                                  {document.name for document, _ in rows}, who, new_description)
             if taken:
                 st.error("Already in this review: " + ", ".join(taken) + ". Rename the file to add it as another "
                          "document.", icon=":material/error:")
             else:
-                who = st.session_state.get("last_reviewer", "")
-                for upload in new_files:
-                    add_supporting_document(st.session_state.case_id,
-                                            UploadedDocument(upload.name, upload.getvalue(),
-                                                             media_type_for(upload.name, upload.type)),
-                                            "", who, description=new_description)
                 log_event(audit_path, who, f"Added {len(new_files)} document(s) to the review: "
                           + ", ".join(f.name for f in new_files) + "; all documents to be read again")
                 # Keep the document types already corrected, then read every document again on Document intelligence
@@ -1737,89 +1737,17 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
     earlier = load_snapshot(review_key, cycle - 1) if cycle > 1 else None
     last_approved = {line.id: line for line in earlier.lines} if earlier else {}
-    PUBLIC_SOURCES = ("Companies House record", "FCA register record", "Company website")
     entered_number = parse_company_number(company_link) or company_link.strip()
     found_in_documents = identification.details if identification and identification.extracted else {}
 
 
-    def where(source: str) -> str:
-        """ "certificate.pdf p.1" -> "certificate.pdf, page 1" """
-        return re.sub(r" p\.(\d+)$", r", page \1", source)
-
-
-    # The facts compared across documents on Document intelligence, and the line each belongs to, with its label there
-    KEY_FACT_LINES = {"1.1": {"Company name": "Company name", "Registration number": "Company number"},
-                      "1.2": {"Registered address": "Registered office"}}
-
-
-    def without_page(source: str) -> str:
-        return re.sub(r", page \d+$", "", source)
-
-
-    def line_details(o) -> tuple[list[list], list[str], list[str]]:
-        """What one line rests on: from the documents, one row per value as [label, value, where found, documents
-        disagree], so a value found in several documents is one row listing them all; then the public registers
-        and website, and what the analyst provided, as Markdown bullets. Text from documents is shown as written."""
-        rows: dict[tuple[str, str], list] = {}
-
-        def add(label: str, value: str, source: str, disagree: bool = False) -> None:
-            row = rows.setdefault((label, normalise(value)), [label, value, [], disagree])
-            if source in row[2] or any(without_page(listed) == source for listed in row[2]):
-                return  # already listed (with its page)
-            if source != without_page(source) and without_page(source) in row[2]:
-                row[2][row[2].index(without_page(source))] = source  # now with its page
-                return
-            row[2].append(source)
-
-        for fact in key_facts(found_in_documents):
-            label = KEY_FACT_LINES.get(o.check.id, {}).get(fact.fact)
-            for value, found_in in (fact.values.items() if label else []):
-                for name in found_in:
-                    add(label, value, name, fact.disagree)
-        for label, value, source in named.line_facts(o.check.id):
-            add(label, value, where(source))
-        if o.check.section.startswith("3."):
-            for name, shares in owners(found_in_documents):
-                for share, found_in in shares.items():
-                    for document in found_in:
-                        add(f"Owner {name}", share, document, len(shares) > 1)
-        if o.check.section.startswith("4."):
-            for name, roles, found_in in people(found_in_documents):
-                for document in found_in:
-                    add(f"Person {name}", ", ".join(roles) or "named", document)
-        registers_said, document_names = [], {d.name for d in documents}
-        for item in o.evidence:
-            quoted = re.match(r'^(.*?)(?: p\.(\d+))?: "(.*)"$', item, re.S)
-            if not quoted:  # a reference the rules added, e.g. "Companies House API, checked 07 Nov 2026"
-                if not any(item.startswith(name) for name in document_names):  # a document is listed above
-                    registers_said.append(as_written(item))
-                continue
-            source, page, quote = quoted.groups()
-            if source in PUBLIC_SOURCES:  # a register or website has no pages
-                registers_said.append(f"“{as_written(quote)}” · {as_written(source)}")
-            else:  # a quote that is a value already listed joins that row, e.g. the company name on the certificate
-                same = next((row for (label, value), row in rows.items()
-                             if label != "Quoted" and value == normalise(quote)), None)
-                add(same[0] if same else "Quoted", same[1] if same else quote,
-                    f"{source}, page {page}" if page else source, same[3] if same else False)
-        documents_said = list(rows.values())
-        analyst_said = []
-        if o.check.id == "1.1" and entity_name.strip():
-            analyst_said.append(f"Legal entity name entered: **{as_written(entity_name.strip())}**")
-        if o.check.id in ("1.1", "1.3") and entered_number:
-            analyst_said.append(f"Company number entered: **{as_written(entered_number)}**")
-        if "FCA" in o.check.evidence_source and fca_frn.strip():
-            analyst_said.append(f"FCA firm reference number entered: **{as_written(fca_frn.strip())}**")
-        if "website" in o.check.evidence_source.lower() and website.strip():
-            analyst_said.append(f"Website entered: **{as_written(website.strip())}**")
-        for record in supporting_by_check.get(o.check.id, []):
-            analyst_said.append(
-                f"Supporting document: **{as_written(record['name'])}**"
-                + (f" ({as_written(record['description'])})" if record.get("description") else "")
-                + ", added" + (f" by {as_written(record['added_by'])}" if record["added_by"] else "")
-                + f" on {record['added_on']}"
-                + (f". Clario AI: {record['verdict']}. {as_written(record.get('verdict_finding', ''))}"
-                   if record.get("verdict") else ""))
+    def line_details(o) -> tuple[list[Row], list[str], list[tuple[str, str, str]]]:
+        """What one line rests on: from the documents, the public registers and website, and the analyst."""
+        documents_said, registers_said = from_documents_and_registers(
+            o.check.id, o.check.section, named.line_facts(o.check.id), found_in_documents, o.evidence,
+            {d.name for d in documents})
+        analyst_said = provided_by_analyst(o.check.id, o.check.evidence_source, entity_name, entered_number, fca_frn,
+                                           website, supporting_by_check.get(o.check.id, []))
         return documents_said, registers_said, analyst_said
 
 
@@ -1883,10 +1811,12 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                 st.markdown("\n".join(f"- {as_written(source)}" for source in sources))
                     if registers_said:
                         st.markdown("**:material/account_balance: From the public registers and website**")
-                        st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
+                        st.markdown("\n".join(f"- {as_written(said)}" for said in registers_said))
                     if analyst_said:
                         st.markdown("**:material/person: Provided by the analyst**")
-                        st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
+                        st.markdown("\n".join(f"- {label}: **{as_written(value)}**"
+                                               + (f" {as_written(note)}" if note else "")
+                                               for label, value, note in analyst_said))
             # Add a supporting document: upload, describe it and save, in a fold-out section
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
                 uploads = st.file_uploader(
