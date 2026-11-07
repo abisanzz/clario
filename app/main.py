@@ -64,6 +64,21 @@ def sign_in() -> None:
                 st.session_state.just_signed_in = True  # signing in always opens the Dashboard
                 st.rerun()
         st.caption(":material/info: Demo environment: choose a team member to continue. No password is needed.")
+        if is_demo():  # a first-time visitor's route to the findings, and what to look for there
+            with st.container(border=True):
+                st.markdown("**:material/route: Try it in five steps**")
+                st.markdown(
+                    "1. Choose any team member and press **Sign in**.\n"
+                    "2. Click **New assessment**. The example company, EXAMPLE PAYMENTS LTD, is filled in: press "
+                    "**Save and continue**.\n"
+                    "3. **Document intelligence**: Clario has identified each document and compared the key facts. "
+                    "Press **Next**.\n"
+                    "4. **Risk assessment**: Clario suggests the industry and a risk rating. Press **Next**.\n"
+                    "5. **Evidence review**: every checklist line, with what is present, missing or unclear. Open a "
+                    "line's **Details** to see the evidence behind it.")
+                st.caption("Look for the problems planted in the example: the FCA firm reference 999999 is not on the "
+                           "FCA register (check 2.1), the documents disagree on a shareholding, 25% against 28% "
+                           "(check 3.2), and the company number is not on Companies House (check 1.3).")
 
 
 def sign_out() -> None:
