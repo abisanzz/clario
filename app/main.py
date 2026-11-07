@@ -26,13 +26,11 @@ from services.cases import list_cases  # noqa: E402
 
 st.set_page_config(page_title="Clario", page_icon=str(ASSETS / "clario-icon.svg"), layout="wide")
 st.logo(str(ASSETS / "clario-logo.svg"), icon_image=str(ASSETS / "clario-icon.svg"), size="large")
-# Readability on navy: Streamlit fades captions, placeholders and help text, which is hard to read on a dark
-# background, so give them a solid light colour and make body text a touch heavier
+# Body text and field labels a touch heavier. No colours here: the light and dark themes in .streamlit/config.toml
+# set them, so this reads the same in either mode
 st.html("""<style>
-[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * { color: #D3DCEA !important; opacity: 1; }
-input::placeholder, textarea::placeholder { color: #AEBBD0 !important; opacity: 1; }
 [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li { font-weight: 450; }
-[data-testid="stWidgetLabel"] p { color: #E8EEF7 !important; font-weight: 500; }
+[data-testid="stWidgetLabel"] p { font-weight: 500; }
 </style>""")
 
 

@@ -1,42 +1,71 @@
-# Clario theme: one navy workspace, matching the sidebar, with slate cards, near-white text and a teal accent.
+# Clario theme: a near-black workspace with a purple accent, and a matching light version.
+# Each user picks Light, Dark or their system setting from the menu (top right, ⋮ › Settings).
 
 [theme]
-base = "dark"
-primaryColor = "#139A8C"            # teal: buttons and active elements (white text stays readable)
-backgroundColor = "#223559"         # navy, the same as the sidebar
-secondaryBackgroundColor = "#30466E"  # slate navy: inputs, cards and table headers
-textColor = "#F8FAFC"               # near-white, so text and captions read clearly
-borderColor = "#4A5E85"
-linkColor = "#5EEAD4"
-linkUnderline = false
-
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
 baseFontSize = 16
 headingFontSizes = ["2.1rem", "1.45rem", "1.15rem", "1rem", "0.9rem", "0.8rem"]
 headingFontWeights = [700, 600, 600, 600, 500, 500]
-baseRadius = "10px"
-buttonRadius = "8px"
+baseRadius = "12px"
+buttonRadius = "10px"
 showWidgetBorder = true
 showSidebarBorder = true            # a thin line between the sidebar and the page
+linkUnderline = false
 
-dataframeBorderColor = "#4A5E85"
-dataframeHeaderBackgroundColor = "#2B4068"
+[theme.dark]
+primaryColor = "#6D5DE7"            # purple: buttons and active elements (white text stays readable)
+backgroundColor = "#0E0F14"         # near-black page
+secondaryBackgroundColor = "#171A26"  # cards, inputs and table cells
+textColor = "#E8E9F0"
+borderColor = "#262A3A"
+linkColor = "#C9C2FF"
+codeTextColor = "#C9C2FF"           # review IDs and other code-style text
+codeBackgroundColor = "#1C1F2D"
+dataframeBorderColor = "#262A3A"
+dataframeHeaderBackgroundColor = "#1C1F2D"
 
-# Status badge colours: lighter tints, readable on navy
-greenColor = "#4ADE80"
-orangeColor = "#FBBF24"
-redColor = "#F87171"
-blueColor = "#60A5FA"
-violetColor = "#A78BFA"
-grayColor = "#94A3B8"
+# Status badge colours: lighter tints, readable on near-black
+greenColor = "#5FD39A"
+orangeColor = "#F5C46B"
+redColor = "#FF9B8A"
+blueColor = "#8FB8FF"
+violetColor = "#C9C2FF"
+grayColor = "#9097AE"
 
-[theme.sidebar]
-backgroundColor = "#223559"         # navy
-secondaryBackgroundColor = "#30466E"
-textColor = "#F8FAFC"
-borderColor = "#4A5E85"
-primaryColor = "#5EEAD4"            # light teal, readable on navy
+[theme.dark.sidebar]
+backgroundColor = "#14161F"         # a shade lighter than the page
+secondaryBackgroundColor = "#252846"  # the selected menu item
+textColor = "#C3C7D6"
+borderColor = "#232634"
+primaryColor = "#C9C2FF"            # light purple, readable on the dark sidebar
+
+[theme.light]
+primaryColor = "#5B4BD6"            # deeper purple, so white button text stays readable
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F2FA"  # cards, inputs and table cells
+textColor = "#1A1B25"
+borderColor = "#DCDCE8"
+linkColor = "#4F3FD0"
+codeTextColor = "#4F3FD0"           # review IDs and other code-style text
+codeBackgroundColor = "#ECEBF7"
+dataframeBorderColor = "#DCDCE8"
+dataframeHeaderBackgroundColor = "#ECEBF7"
+
+# Status badge colours: darker shades, readable on white
+greenColor = "#1A7F4B"
+orangeColor = "#A15C00"
+redColor = "#C2362B"
+blueColor = "#1F5FBF"
+violetColor = "#5B4BD6"
+grayColor = "#5F6478"
+
+[theme.light.sidebar]
+backgroundColor = "#F6F5FC"
+secondaryBackgroundColor = "#E7E4FA"  # the selected menu item
+textColor = "#2A2C3A"
+borderColor = "#DCDCE8"
+primaryColor = "#5B4BD6"
 
 [client]
-toolbarMode = "minimal"            # hide the developer menu and Deploy button
+toolbarMode = "viewer"             # shows the theme switch; hides the developer menu and Deploy button
