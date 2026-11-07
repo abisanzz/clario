@@ -1820,9 +1820,11 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                             + (f" · **Validated by:** {o.validated_by}" if o.validated_by else "")
                             + (f"\n- **Before the change:** {product_voice(o.before_review)}" if o.before_review
                                else ""))
-                # Its own fold-out, open to start with, so the analyst can minimise a long list
-                with st.expander(f"**Extracted from the documents** ({len(documents_said)})",
-                                 icon=":material/description:", expanded=True, key=f"extracted_{key}"):
+                # Everything the line used, in its own fold-out, open to start with, so the analyst can minimise it
+                used = len(documents_said) + len(registers_said) + len(analyst_said)
+                with st.expander(f"**Information used** ({used})", icon=":material/fact_check:", expanded=True,
+                                 key=f"information_{key}"):
+                    st.markdown("**:material/description: Extracted from the documents**")
                     if not documents_said:
                         st.caption("Nothing was found in the documents for this line.")
                     for number, (label, value, sources, disagree) in enumerate(documents_said):
@@ -1836,12 +1838,12 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                             icon=":material/find_in_page:", help="Where this was found",
                                             key=f"where_{key}_{number}"):
                                 st.markdown("\n".join(f"- {as_written(source)}" for source in sources))
-                if registers_said:
-                    st.markdown("**:material/account_balance: From the public registers and website**")
-                    st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
-                if analyst_said:
-                    st.markdown("**:material/person: Provided by the analyst**")
-                    st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
+                    if registers_said:
+                        st.markdown("**:material/account_balance: From the public registers and website**")
+                        st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
+                    if analyst_said:
+                        st.markdown("**:material/person: Provided by the analyst**")
+                        st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
             # Add a supporting document: upload, describe it and save, in a fold-out section
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
                 uploads = st.file_uploader(
