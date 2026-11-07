@@ -82,10 +82,16 @@ PAGE_PATHS = ["assessments", "new", "assessment", "document-intelligence", "evid
 # This script copies the latest choice to every page address, starting with Dark, and reloads once if the page
 # opened in a different mode. It relies on how Streamlit 1.64 stores the choice; if that changes, Clario simply
 # falls back to Streamlit's own behaviour.
-theme_keys = json.dumps([f"stActiveTheme-/{path}-v2" for path in ["", *PAGE_PATHS]])
+page_paths = json.dumps(PAGE_PATHS)
 st.html(f"""<script>
 (() => {{ try {{
-  const keys = {theme_keys};
+  // The app's own address, e.g. "/" on this computer or "/~/+/" on Streamlit Community Cloud, then each page's
+  let base = window.location.pathname;
+  for (const page of {page_paths}) {{
+    if (base.endsWith("/" + page)) {{ base = base.slice(0, -page.length); break; }}
+  }}
+  if (!base.endsWith("/")) base += "/";
+  const keys = ["", ...{page_paths}].map((page) => `stActiveTheme-${{base}}${{page}}-v2`);
   const store = window.localStorage;
   if (!window.clarioLoadKey) window.clarioLoadKey = `stActiveTheme-${{window.location.pathname}}-v2`;
   const loadKey = window.clarioLoadKey;  // the address this page was opened on, which Streamlit reads its choice from
