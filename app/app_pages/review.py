@@ -820,7 +820,7 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
     picked_documents = st.dataframe(pd.DataFrame([{
         "File": document.name,
         "Your description": (record.get("description", "") if record else document.description) or "",
-        "Supports": ((f"Check {record['check_id']}" if record["check_id"] else "Added on Document intelligence")
+        "Supports": ((f"Check {record['check_id']}" if record["check_id"] else "Added to the review")
                      if record else "Original document"),
     } for document, record in rows]), hide_index=True, height="content", on_select="rerun",
         selection_mode="multi-row", key=f"documents_{pack_key}_{len(rows)}")
@@ -859,6 +859,40 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
                 if st.button("Cancel", key="cancel_delete"):
                     st.session_state.pop("delete_pending", None)
                     st.rerun()
+
+    # Add documents, from any tab: saved to the review's document store, then every document is read again on
+    # Document intelligence. "\$" keeps the dollar signs from being read as a formula.
+    if st.session_state.get("case_id"):
+        st.markdown("**:material/note_add: Add documents**")
+        st.caption("Added to the review's document store, then Clario AI reads all the documents again on Document "
+                   "intelligence, so the document types and key facts update (about \\$0.10 to \\$0.15). The "
+                   "document types you corrected and your comments are kept.")
+        new_files = st.file_uploader("Documents to add", type=UPLOAD_TYPES, accept_multiple_files=True,
+                                     key=f"add_to_pack_{pack_key}")
+        new_description = st.text_input("What do they show? (optional)", key=f"add_to_pack_note_{pack_key}",
+                                        placeholder="e.g. Updated register of members, dated 20 Oct 2026",
+                                        help="Saved with the documents and shown in the list above.")
+        if st.button("Add and re-read the documents", icon=":material/note_add:", disabled=not new_files):
+            taken = [f.name for f in new_files if f.name in {document.name for document, _ in rows}]
+            if taken:
+                st.error("Already in this review: " + ", ".join(taken) + ". Rename the file to add it as another "
+                         "document.", icon=":material/error:")
+            else:
+                who = st.session_state.get("last_reviewer", "")
+                for upload in new_files:
+                    add_supporting_document(st.session_state.case_id,
+                                            UploadedDocument(upload.name, upload.getvalue(),
+                                                             media_type_for(upload.name, upload.type)),
+                                            "", who, description=new_description)
+                log_event(audit_path, who, f"Added {len(new_files)} document(s) to the review: "
+                          + ", ".join(f.name for f in new_files) + "; all documents to be read again")
+                # Keep the document types already corrected, then read every document again on Document intelligence
+                st.session_state.label_corrections = {**st.session_state.get("label_corrections", {}),
+                                                      **{label.name: label for label in
+                                                         st.session_state.get("labels") or []}}
+                st.session_state.entity = {**saved, "supporting": [document for document, _ in
+                                                                   load_supporting(st.session_state.case_id)]}
+                go("documents")
 if st.session_state.get("pack_key") != pack_key:
     st.session_state.pack_key = pack_key
     for key in ("identification", "labels", "industry", "choice", "assessment"):
@@ -1076,41 +1110,6 @@ if screen == "documents":
                     confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
                     if comment.strip():
                         comments[label.name] = comment.strip()
-
-        # --- Add more documents: saved to the review's document store, then every document is read again ---
-        if "identification" in st.session_state and st.session_state.get("case_id"):
-            # A fold-out, minimised to start with; "\$" keeps the dollar signs from being read as a formula
-            with st.expander("**Add documents**", icon=":material/note_add:", expanded=False):
-                st.caption(f"Clario AI reads all {len(documents)} documents again with the new ones, so each "
-                           "document's type and the key facts update (about \\$0.10 to \\$0.15). The document types "
-                           "you corrected and your comments are kept.")
-                new_files = st.file_uploader("Documents to add", type=UPLOAD_TYPES, accept_multiple_files=True,
-                                             key=f"add_to_pack_{pack_key}")
-                new_description = st.text_input("What do they show? (optional)", key=f"add_to_pack_note_{pack_key}",
-                                                placeholder="e.g. Updated register of members, dated 20 Oct 2026",
-                                                help="Saved with the documents and shown in the Documents list.")
-                if st.button("Add and re-read the documents", icon=":material/refresh:", disabled=not new_files):
-                    taken = [f.name for f in new_files if f.name in {d.name for d in documents}]
-                    if taken:
-                        st.error("Already in this review: " + ", ".join(taken) + ". Rename the file to add it as "
-                                 "another document.", icon=":material/error:")
-                    else:
-                        who = st.session_state.get("last_reviewer", "")
-                        for upload in new_files:
-                            add_supporting_document(
-                                st.session_state.case_id, UploadedDocument(upload.name, upload.getvalue(),
-                                                                           media_type_for(upload.name, upload.type)),
-                                "", who, description=new_description)
-                        log_event(audit_path, who, f"Added {len(new_files)} document(s) on Document intelligence: "
-                                  + ", ".join(f.name for f in new_files) + "; all documents to be read again")
-                        # Keep the types you corrected for the documents already here, then read them all again
-                        st.session_state.label_corrections = {label.name: label for label in confirmed}
-                        st.session_state.label_comments = comments
-                        st.session_state.entity = {**saved, "supporting": [document for document, _ in
-                                                                           load_supporting(st.session_state.case_id)]}
-                        for stale in ("identification", "labels"):
-                            st.session_state.pop(stale, None)
-                        st.rerun()
 
         if "identification" in st.session_state:
             show_key_facts(st.session_state.identification)
@@ -2068,26 +2067,6 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                 + (f": {change.note}" if change.note else ""), width="stretch")
                     st.button("Undo", key=f"undo_{change.check_id}", icon=":material/undo:",
                               on_click=undo_line, args=(change.check_id,))
-
-    # --- Add a document: e.g. a current proof of address at a periodic review ---
-
-    with st.expander("Add a document", icon=":material/note_add:"):
-        st.caption("Add a new or replacement document to the review's document store, and say which check it "
-                   "supports. To have Clario read it, re-run that section afterwards.")
-        added = st.file_uploader("Document", type=UPLOAD_TYPES, accept_multiple_files=True, key="add_document")
-        supports = st.selectbox("Which check does it support?", review_outcomes,
-                                format_func=lambda o: f"{o.check.id} {o.check.check}", key="add_document_check")
-        added_description = st.text_input("What does this document show? (optional)", key="add_document_description",
-                                          placeholder="e.g. Utility bill for the registered office, dated 20 Oct 2026")
-        if st.button("Add document", icon=":material/save:", disabled=not added):
-            problems = save_lines([(supports, supports.status, bool(supports.validated_by), supports.reviewer_note,
-                                    added, added_description)])
-            if problems:
-                st.error("Not added:\n" + "\n".join(f"- {problem}" for problem in problems), icon=":material/error:")
-            else:
-                for key in ("add_document", "add_document_description"):
-                    st.session_state.pop(key, None)
-                st.rerun()
 
     # --- Submit for approval, then final approval by senior management, needed for every review ---
 
