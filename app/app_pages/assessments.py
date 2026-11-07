@@ -14,6 +14,10 @@ from services.overview import all_assessments  # noqa: E402
 
 st.title("Assessments")
 st.caption("Search, open or start a KYC assessment.")
+# A little less margin either side on this page, so every column of the table fits on screen
+st.html("""<style>
+[data-testid="stMainBlockContainer"] { padding-left: 2.5rem; padding-right: 2.5rem; }
+</style>""")
 
 RECENT = 10  # shown when the page opens; search finds the rest
 assessments = sorted(all_assessments(), key=lambda a: a.last_activity, reverse=True)  # most recent first
@@ -67,7 +71,8 @@ picked = st.dataframe(
         "Legal entity": st.column_config.TextColumn(width=250),
         "Status": st.column_config.TextColumn(width=104),
         "Checklist": st.column_config.TextColumn(width=305),  # wide enough for the whole name
-        "Owner": st.column_config.TextColumn(width=120),
+        "Owner": st.column_config.TextColumn(width=105),
+        "Next review": st.column_config.TextColumn(width=100),
     },
 )
 # One place to open from, under the table: the entity found by search, or the row selected
