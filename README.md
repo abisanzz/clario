@@ -2,6 +2,8 @@
 
 Clario is an internal workspace for a KYC (know your customer) team onboarding financial services clients. An analyst adds a company's details and documents; Clario identifies each document, extracts the key facts, checks them against Companies House and the FCA register, suggests an industry and a risk rating, and checks the whole pack against a risk-based checklist. The analyst validates every line, submits the review, and senior management approves it. Approved reviews are frozen, then reviewed again on a schedule set by the risk rating.
 
+**Try it:** [clario-kyc.streamlit.app](https://clario-kyc.streamlit.app/), a public demo. Sign in as any team member, start a new assessment and work through the example case. The demo replays saved answers, so uploads and new AI readings are switched off.
+
 ![The Clario dashboard: the team's assessments, filters and the priority work queue](docs/screenshots/dashboard.png)
 
 ## The workflow
@@ -93,6 +95,8 @@ Sign in as any of the demo team members, start a new assessment and choose **Exa
 ```bash
 .venv/bin/python -m pytest
 ```
+
+To host a public demo like the one above, set `CLARIO_DEMO = "true"` (for example as a secret on Streamlit Community Cloud) and give it only the Companies House and FCA keys. In demo mode new assessments use the example case, uploads are switched off, and Clario never connects to the AI service, even if a key is set.
 
 ## Project layout
 
