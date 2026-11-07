@@ -4,6 +4,7 @@ assessment.
 Run from the project folder:  .venv/bin/streamlit run app/main.py
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -74,6 +75,42 @@ if "user" not in st.session_state and remembered_user in TEAM:
 
 # Every page's address, so a bookmark or link opened while signed out shows the sign-in, then that page
 PAGE_PATHS = ["assessments", "new", "assessment", "document-intelligence", "evidence-review", "audit-history", "about"]
+
+# Dark mode by default, and one Light/Dark choice for every page. Streamlit remembers the choice from the menu
+# (⋮ › Settings) in the browser, separately for each page address, and starts from the computer's own setting.
+# This script copies the latest choice to every page address, starting with Dark, and reloads once if the page
+# opened in a different mode. It relies on how Streamlit 1.64 stores the choice; if that changes, Clario simply
+# falls back to Streamlit's own behaviour.
+theme_keys = json.dumps([f"stActiveTheme-/{path}-v2" for path in ["", *PAGE_PATHS]])
+st.html(f"""<script>
+(() => {{ try {{
+  const keys = {theme_keys};
+  const store = window.localStorage;
+  if (!window.clarioLoadKey) window.clarioLoadKey = `stActiveTheme-${{window.location.pathname}}-v2`;
+  const loadKey = window.clarioLoadKey;  // the address this page was opened on, which Streamlit reads its choice from
+  const choice = store.getItem("clario-theme") || '"Dark"';
+  if (store.getItem(loadKey) !== choice) {{
+    if (store.getItem(loadKey) && window.clarioSeen !== undefined) return;  // a new choice: the check below copies it
+    keys.forEach((key) => store.setItem(key, choice));
+    store.setItem("clario-theme", choice);
+    // Reload at most once per browser tab, so a browser that blocks saved settings never reloads over and over
+    if (store.getItem(loadKey) === choice && !window.sessionStorage.getItem("clario-theme-reloaded")) {{
+      window.sessionStorage.setItem("clario-theme-reloaded", "yes");
+      window.location.reload();
+    }}
+    return;
+  }}
+  window.clarioSeen = choice;
+  if (window.clarioWatch) return;
+  window.clarioWatch = setInterval(() => {{  // a choice made in the menu: use it on every page from now on
+    const now = store.getItem(loadKey);
+    if (now && now !== store.getItem("clario-theme")) {{
+      keys.forEach((key) => store.setItem(key, now));
+      store.setItem("clario-theme", now);
+    }}
+  }}, 1000);
+}} catch (error) {{ /* saved settings blocked: Streamlit's own behaviour applies */ }} }})();
+</script>""", unsafe_allow_javascript=True)
 
 if "user" not in st.session_state:
     st.navigation([st.Page(sign_in, title="Sign in", icon=":material/login:", default=True)]
