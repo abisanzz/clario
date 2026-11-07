@@ -13,6 +13,7 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
+from services.demo import DEMO_NOTE, is_demo
 from services.documents import CertificateOfIncorporation, Fact
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -164,7 +165,10 @@ def tokens(usage) -> tuple[int, int]:
 
 
 def make_client():
-    """An Anthropic client using the key in .env."""
+    """An Anthropic client using the key in .env. Never in the public demo, so it cannot spend money even if a key
+    is set there: saved answers replay without a client, and anything else stops with a message."""
+    if is_demo():
+        raise ExtractionFailed(DEMO_NOTE)
     load_dotenv(ENV_PATH)
     try:
         return anthropic.Anthropic()

@@ -24,6 +24,7 @@ from app.session import (  # noqa: E402
     unsaved_summary,
 )
 from services.cases import list_cases  # noqa: E402
+from services.demo import is_demo  # noqa: E402
 
 st.set_page_config(page_title="Clario", page_icon=str(ASSETS / "clario-icon.svg"), layout="wide")
 st.logo(str(ASSETS / "clario-logo.svg"), icon_image=str(ASSETS / "clario-icon.svg"), size="large")
@@ -167,6 +168,9 @@ with st.sidebar:
             st.markdown(f"**{st.session_state.user}**")
             st.caption(TEAM.get(st.session_state.user, "KYC Operations"))
     st.button("Sign out", icon=":material/logout:", type="tertiary", on_click=sign_out)
+    if is_demo():
+        st.caption(":material/science: **Public demo.** Start a new assessment to try the example case. Uploads and "
+                   "new AI readings are switched off, and everyone shares the same data, which resets now and then.")
 
 
 @st.dialog("Unsaved changes", icon=":material/warning:", dismissible=False, width="medium")

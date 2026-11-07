@@ -23,3 +23,6 @@ reviews/
 
 # Draft reviews: entity details and client documents (stay on this computer)
 cases/
+
+# Secrets for the hosted demo, if tested on this computer
+.streamlit/secrets.toml

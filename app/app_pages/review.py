@@ -90,6 +90,7 @@ from services.conversion import (  # noqa: E402
     to_text,
 )
 from services.countries import COUNTRIES, UNITED_KINGDOM, is_uk  # noqa: E402
+from services.demo import DEMO_NOTE, is_demo  # noqa: E402
 from services.verification import check_facts, companies_house_record  # noqa: E402
 from services.intelligence import key_facts, normalise, owners, people  # noqa: E402
 from services.information import Row, from_documents_and_registers, provided_by_analyst, without_page  # noqa: E402
@@ -384,6 +385,8 @@ def details_tab() -> None:
         st.subheader(":material/upload_file: Legal Entity Information")
         # The documents choice sits below the fields but decides what they are filled with, so read its last setting
         source = st.session_state.get("source") or saved.get("source") or "Upload documents"
+        if is_demo() and not st.session_state.get("case_id"):
+            source = "Sample pack"  # the public demo uses the example case only
 
         entity_name = st.text_input(
             "Legal Entity Full Name",
@@ -454,6 +457,11 @@ def details_tab() -> None:
         if st.session_state.get("case_id"):  # a saved review keeps its own documents: no switching to the example
             source = saved.get("source") or "Upload documents"
             st.markdown("**Documents**")
+        elif is_demo():  # the public demo: the example case only, so no client documents are uploaded
+            source = "Sample pack"
+            st.markdown("**Documents**")
+            st.caption(":material/info: The public demo uses the example case. Run Clario on your own computer to "
+                       "review a client's documents.")
         else:  # a new assessment: the client's documents, or the example case for training and walkthroughs
             source = st.segmented_control(
                 "Documents", ["Upload documents", "Sample pack"], default=saved.get("source", "Upload documents"),
@@ -475,10 +483,11 @@ def details_tab() -> None:
                                        default=[d.name for d in earlier], key="kept_documents",
                                        help="Remove a document by clicking its ×. Add more below.")
                 kept = [d for d in earlier if d.name in names]
-            uploads = st.file_uploader("Add documents" if earlier else "Company documents",
-                                       help="PDFs, Word (.docx), Excel (.xlsx), CSV, text, emails (.eml), web pages "
-                                            "(.html) or photos (PNG, JPEG, WebP, GIF).",
-                                       type=UPLOAD_TYPES, accept_multiple_files=True)
+            uploads = None if is_demo() else st.file_uploader(
+                "Add documents" if earlier else "Company documents",
+                help="PDFs, Word (.docx), Excel (.xlsx), CSV, text, emails (.eml), web pages (.html) or photos (PNG, "
+                     "JPEG, WebP, GIF).",
+                type=UPLOAD_TYPES, accept_multiple_files=True)
             added = [UploadedDocument(u.name, u.getvalue(), media_type_for(u.name, u.type)) for u in uploads or []]
             added_names = {d.name for d in added}
             documents = [d for d in kept if d.name not in added_names] + added  # a new file replaces one with its name
@@ -857,7 +866,9 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
 
     # Add documents, from any tab: saved to the review's document store, then every document is read again on
     # Document intelligence. "\$" keeps the dollar signs from being read as a formula.
-    if st.session_state.get("case_id"):
+    if is_demo():
+        st.caption(f":material/note_add: Adding documents: {DEMO_NOTE}")
+    elif st.session_state.get("case_id"):
         st.markdown("**:material/note_add: Add documents**")
         st.caption("Added to the review's document store, then Clario AI reads all the documents again on Document "
                    "intelligence, so the document types and key facts update (about \\$0.10 to \\$0.15). The "
@@ -985,7 +996,9 @@ def show_key_facts(identification) -> None:
             st.caption("Key details (company name, registration number, address, dates, people and owners) have not "
                        "been extracted for these documents yet. Extract them to compare the documents; the document "
                        "types stay as they are.")
-            if st.button("Extract the details", icon=":material/manage_search:"):
+            if is_demo():
+                st.caption(DEMO_NOTE)
+            elif st.button("Extract the details", icon=":material/manage_search:"):
                 with st.spinner(f"Clario is extracting the details from {len(documents)} documents..."):
                     try:
                         st.session_state.identification = extract_details(
@@ -1314,9 +1327,10 @@ if screen == "assess":
                                          help="Name of the AML senior officer who signed off the override.")
                 st.markdown("**Evidence of the sign-off** (a document, a link, or both)")
                 with st.container(horizontal=True):
-                    upload = st.file_uploader("Sign-off document", key=f"evidence_{pack_key}",
-                                              type=["pdf", "png", "jpg", "jpeg", "docx", "msg", "eml"],
-                                              help="For example the signed form, or the approval email saved as a PDF.")
+                    upload = None if is_demo() else st.file_uploader(
+                        "Sign-off document", key=f"evidence_{pack_key}",
+                        type=["pdf", "png", "jpg", "jpeg", "docx", "msg", "eml"],
+                        help="For example the signed form, or the approval email saved as a PDF.")
                     evidence_link = st.text_input(
                         "Or a link to the folder where the evidence is saved", key=f"evidence_link_{pack_key}",
                         value=decision.evidence_link if overridden_before else "",
@@ -1634,7 +1648,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     + ", ".join(r["name"] for r in not_yet_read) + ". Re-run the section they belong to (button in each "
                     "section), or re-run all the checks, so Clario reads them with the rest of the documents.",
                     icon=":material/attach_file:")
-            if st.button("Re-run all the checks with the new documents", icon=":material/refresh:"):
+            if st.button("Re-run all the checks with the new documents", icon=":material/refresh:",
+                         disabled=is_demo(), help=DEMO_NOTE if is_demo() else None):
                 st.session_state.entity = {**saved, "supporting": [d for d, _ in supporting_documents.values()]}
                 go("documents")
             st.caption("Re-running everything reads every document again, with the industry and risk rating. Your "
@@ -1818,19 +1833,23 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                                                + (f" {as_written(note)}" if note else "")
                                                for label, value, note in analyst_said))
             # Add a supporting document: upload, describe it and save, in a fold-out section
+            uploads, description, upload_save = [], "", False  # nothing to add in the public demo
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
-                uploads = st.file_uploader(
-                    "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
-                    help="Added to the review's document store when you save this line.")
-                description = st.text_input(
-                    "What does this document show? (optional)", key=f"description_{key}",
-                    placeholder="e.g. Updated register of members, dated 20 Oct 2026",
-                    help="Clario AI reads this with the document to understand what it is for.")
-                if uploads and o.status is not Status.PRESENT:
-                    st.caption(":material/smart_toy: When you save, Clario reads the document against this "
-                               "check and sets the line to Present if it provides the evidence.")
-                upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
-                                        disabled=not uploads, help="Add the document and save this line.")
+                if is_demo():
+                    st.caption(DEMO_NOTE)
+                else:
+                    uploads = st.file_uploader(
+                        "Document", type=UPLOAD_TYPES, accept_multiple_files=True, key=f"upload_{key}",
+                        help="Added to the review's document store when you save this line.")
+                    description = st.text_input(
+                        "What does this document show? (optional)", key=f"description_{key}",
+                        placeholder="e.g. Updated register of members, dated 20 Oct 2026",
+                        help="Clario AI reads this with the document to understand what it is for.")
+                    if uploads and o.status is not Status.PRESENT:
+                        st.caption(":material/smart_toy: When you save, Clario reads the document against this "
+                                   "check and sets the line to Present if it provides the evidence.")
+                    upload_save = st.button("Save", icon=":material/save:", key=f"save_upload_{key}",
+                                            disabled=not uploads, help="Add the document and save this line.")
             line = (o, status, validated, comment or "", uploads or [], description or "")
             lines.append(line)
             if is_changed(line):
@@ -1889,8 +1908,10 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                            "submit it for approval. The documents, industry and risk rating carry over.")
                 who = st.text_input("Your name", value=st.session_state.get("last_reviewer", ""), key="periodic_who",
                                     width=300)
+                if is_demo():
+                    st.caption(DEMO_NOTE)
                 if st.button("Start periodic review", type="primary", icon=":material/play_arrow:",
-                             disabled=not who.strip()):
+                             disabled=not who.strip() or is_demo()):
                     new_cycle = start_periodic_review(review_key)
                     new_key = cycle_key(review_key, new_cycle)
                     copy_file(decision_path, case_file(new_key, "risk-decision"))
@@ -1953,7 +1974,8 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                     st.caption(f":material/attach_file: New in this section: {', '.join(d.name for d, _ in unread)}. "
                                "Re-run it so Clario reads them with the other documents.",
                                width="stretch")
-                    if st.button("Re-run this section", icon=":material/refresh:", key=f"rerun_{section}"):
+                    if st.button("Re-run this section", icon=":material/refresh:", key=f"rerun_{section}",
+                                 disabled=is_demo(), help=DEMO_NOTE if is_demo() else None):
                         try:
                             rerun_section(section, section_ids, unread)
                         except ExtractionFailed as error:
