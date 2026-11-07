@@ -942,9 +942,18 @@ def fit_table(rows: list[dict]) -> None:
 
 
 def show_key_facts(identification) -> None:
-    """The details from every document side by side, with what they disagree on flagged."""
-    with st.container(border=True):
-        st.subheader(":material/manage_search: Key facts across the documents")
+    """The details from every document side by side, with what they disagree on flagged. A fold-out, minimised to
+    start with; its title says when the documents disagree or the details have not been extracted yet."""
+    title = "**Key facts across the documents**"
+    if not identification.extracted:
+        title += " · not extracted yet"
+    else:
+        disagree = [fact.fact for fact in key_facts(identification.details) if fact.disagree]
+        if any(len(shares) > 1 for _, shares in owners(identification.details)):
+            disagree.append("Ownership")
+        if disagree:
+            title += f" · :orange[documents disagree on {', '.join(disagree)}]"
+    with st.expander(title, icon=":material/manage_search:", expanded=False):
         if not identification.extracted:
             st.caption("Key details (company name, registration number, address, dates, people and owners) have not "
                        "been extracted for these documents yet. Extract them to compare the documents; the document "
