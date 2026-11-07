@@ -54,14 +54,10 @@ picked = st.dataframe(
         "Review ID": a.review_id,
         "Legal entity": a.entity_name,
         "Status": a.status,
-        "Checklist": a.checklist or "Not set yet",  # early, so the whole name fits on screen
-        "Industry": a.industry or "Not confirmed yet",
-        "Risk": a.risk or "Not rated yet",
+        "Checklist": a.checklist or "Not set yet",  # its name gives the industry and risk level
+        "Owner": a.owner,
         "Lines validated": a.validated / a.lines if a.lines else 0.0,
         "Next review": a.next_review,
-        "Reason": a.status_reason,
-        "Last activity": a.last_activity,
-        "Owner": a.owner,
     } for a in rows]),
     hide_index=True,
     height="content",
@@ -69,9 +65,10 @@ picked = st.dataframe(
     selection_mode="single-row",
     column_config={
         "Review ID": st.column_config.TextColumn(width=150),
-        "Legal entity": st.column_config.TextColumn(width=265),
-        "Status": st.column_config.TextColumn(width=110),
-        "Checklist": st.column_config.TextColumn(width=300),  # wide enough for the whole name
+        "Legal entity": st.column_config.TextColumn(width=250),
+        "Status": st.column_config.TextColumn(width=104),
+        "Checklist": st.column_config.TextColumn(width=305),  # wide enough for the whole name
+        "Owner": st.column_config.TextColumn(width=120),
         "Lines validated": st.column_config.ProgressColumn(format="percent", min_value=0.0, max_value=1.0,
                                                            help="Checklist lines validated before approval"),
     },
