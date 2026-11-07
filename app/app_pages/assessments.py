@@ -51,23 +51,27 @@ else:
     st.caption(f"{len(assessments)} assessments, most recently worked on first. Select a row to open it.")
 picked = st.dataframe(
     pd.DataFrame([{
-        "Legal entity": a.entity_name,
         "Review ID": a.review_id,
-        "Owner": a.owner,
+        "Legal entity": a.entity_name,
+        "Status": a.status,
+        "Checklist": a.checklist or "Not set yet",  # early, so the whole name fits on screen
         "Industry": a.industry or "Not confirmed yet",
         "Risk": a.risk or "Not rated yet",
-        "Checklist": a.checklist or "Not set yet",
         "Lines validated": a.validated / a.lines if a.lines else 0.0,
-        "Status": a.status,
         "Next review": a.next_review,
         "Reason": a.status_reason,
         "Last activity": a.last_activity,
+        "Owner": a.owner,
     } for a in rows]),
     hide_index=True,
     height="content",
     on_select="rerun",
     selection_mode="single-row",
     column_config={
+        "Review ID": st.column_config.TextColumn(width=150),
+        "Legal entity": st.column_config.TextColumn(width=265),
+        "Status": st.column_config.TextColumn(width=110),
+        "Checklist": st.column_config.TextColumn(width=300),  # wide enough for the whole name
         "Lines validated": st.column_config.ProgressColumn(format="percent", min_value=0.0, max_value=1.0,
                                                            help="Checklist lines validated before approval"),
     },
