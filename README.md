@@ -53,6 +53,7 @@ Company website ──────────┘  Claude: evidence for every ch
 - **Live public registers.** Companies House (company profile, officers, persons with significant control and SIC industry codes) and the FCA Financial Services Register (status, permissions, requirements, disciplinary history and approved individuals).
 - **A team workspace.** A dashboard of every assessment with owner and status filters, a priority work queue and recent activity; eight statuses (Not Started, In Progress, Under Review, Pending Approval, Approved, Rejected, On Hold, Cancelled); assessment owners; search by entity name or review ID. A demo sign-in lets you act as one of four made-up team members.
 - **Safe editing.** Leaving the checklist with unsaved changes asks first and lists the sections and lines affected. Assessments reopen where you left them after a refresh.
+- **Dark and light mode.** Clario opens in a navy dark mode with a purple accent; a light mode is one click away in the menu (⋮ › Settings), and the choice sticks across pages and refreshes.
 
 ## Design choices
 
