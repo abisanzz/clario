@@ -1820,9 +1820,9 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                             + (f" · **Validated by:** {o.validated_by}" if o.validated_by else "")
                             + (f"\n- **Before the change:** {product_voice(o.before_review)}" if o.before_review
                                else ""))
-                # Everything the line used, in its own fold-out, open to start with, so the analyst can minimise it
+                # Everything the line used, in its own fold-out, minimised to start with: the decision comes first
                 used = len(documents_said) + len(registers_said) + len(analyst_said)
-                with st.expander(f"**Information used** ({used})", icon=":material/fact_check:", expanded=True,
+                with st.expander(f"**Information used** ({used})", icon=":material/fact_check:", expanded=False,
                                  key=f"information_{key}"):
                     st.markdown("**:material/description: Extracted from the documents**")
                     if not documents_said:
