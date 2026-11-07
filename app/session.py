@@ -15,8 +15,9 @@ ASSESSMENT_PAGE = "app_pages/review.py"
 ASSESSMENTS_PAGE = "app_pages/assessments.py"
 WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "registration_", "stated_industry_",
                    "owner", "source", "customer_")
-REVIEW_STATE = ("identification", "labels", "label_comments", "industry", "choice", "assessment", "pack_key", "risk",
-                "section_reads", "line_versions", "delete_pending", "line_filter", "unsaved_lines", "leave_to")
+REVIEW_STATE = ("identification", "labels", "label_comments", "label_corrections", "industry", "choice", "assessment",
+                "pack_key", "risk", "section_reads", "line_versions", "delete_pending", "line_filter", "unsaved_lines",
+                "leave_to")
 
 
 def start_over(entity: dict, case_id: str | None) -> None:

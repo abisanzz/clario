@@ -631,7 +631,10 @@ if not saved:  # a new assessment: only the details tab can be used until it is 
 source = saved["source"]
 entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
 documents = (SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]) + saved.get("supporting", [])
-saved_answers = SAMPLE_ANSWERS if source == "Sample pack" else answer_paths(st.session_state.case_id)
+# The example case replays the answers that ship with it; once documents are added to it, its answers are saved in
+# the review's own folder instead, so the shipped ones are never overwritten
+saved_answers = (SAMPLE_ANSWERS if source == "Sample pack" and not saved.get("supporting")
+                 else answer_paths(st.session_state.case_id))
 
 
 def navigation(next_label: str | None = None, next_ready: bool = True, save=None) -> None:
@@ -817,7 +820,8 @@ with st.expander(f"Documents ({len(original_documents) + len(stored_supporting)}
     picked_documents = st.dataframe(pd.DataFrame([{
         "File": document.name,
         "Your description": (record.get("description", "") if record else document.description) or "",
-        "Supports": f"Check {record['check_id']}" if record else "Original document",
+        "Supports": ((f"Check {record['check_id']}" if record["check_id"] else "Added on Document intelligence")
+                     if record else "Original document"),
     } for document, record in rows]), hide_index=True, height="content", on_select="rerun",
         selection_mode="multi-row", key=f"documents_{pack_key}_{len(rows)}")
     ticked = [rows[i] for i in picked_documents.selection.rows]
@@ -1021,7 +1025,10 @@ if screen == "documents":
                         st.button("Try again", icon=":material/refresh:")
             if "identification" in st.session_state:
                 identification = st.session_state.identification
-                shown = st.session_state.get("labels") or identification.labels  # your corrections, if you made any
+                # Your corrections, if you made any; after documents are added, the ones you made before carry over
+                corrected = st.session_state.get("label_corrections", {})
+                shown = st.session_state.get("labels") or [corrected.get(label.name, label)
+                                                           for label in identification.labels]
                 description_of = {d.name: d.description for d in documents}
                 st.caption("Correct any document type that is wrong (the checks use these) and add comments. Open "
                            "a file's **Details** to see why Clario AI chose its type.")
@@ -1060,6 +1067,41 @@ if screen == "documents":
                     confirmed.append(DocumentLabel(label.name, TYPE_KEY[chosen_type], label.reason))
                     if comment.strip():
                         comments[label.name] = comment.strip()
+
+        # --- Add more documents: saved to the review's document store, then every document is read again ---
+        if "identification" in st.session_state and st.session_state.get("case_id"):
+            with st.container(border=True):
+                st.subheader(":material/note_add: Add documents")
+                st.caption(f"Clario AI reads all {len(documents)} documents again with the new ones, so each "
+                           "document's type and the key facts update (about $0.10 to $0.15). The document types "
+                           "you corrected and your comments are kept.")
+                new_files = st.file_uploader("Documents to add", type=UPLOAD_TYPES, accept_multiple_files=True,
+                                             key=f"add_to_pack_{pack_key}")
+                new_description = st.text_input("What do they show? (optional)", key=f"add_to_pack_note_{pack_key}",
+                                                placeholder="e.g. Updated register of members, dated 20 Oct 2026",
+                                                help="Saved with the documents and shown in the Documents list.")
+                if st.button("Add and re-read the documents", icon=":material/refresh:", disabled=not new_files):
+                    taken = [f.name for f in new_files if f.name in {d.name for d in documents}]
+                    if taken:
+                        st.error("Already in this review: " + ", ".join(taken) + ". Rename the file to add it as "
+                                 "another document.", icon=":material/error:")
+                    else:
+                        who = st.session_state.get("last_reviewer", "")
+                        for upload in new_files:
+                            add_supporting_document(
+                                st.session_state.case_id, UploadedDocument(upload.name, upload.getvalue(),
+                                                                           media_type_for(upload.name, upload.type)),
+                                "", who, description=new_description)
+                        log_event(audit_path, who, f"Added {len(new_files)} document(s) on Document intelligence: "
+                                  + ", ".join(f.name for f in new_files) + "; all documents to be read again")
+                        # Keep the types you corrected for the documents already here, then read them all again
+                        st.session_state.label_corrections = {label.name: label for label in confirmed}
+                        st.session_state.label_comments = comments
+                        st.session_state.entity = {**saved, "supporting": [document for document, _ in
+                                                                           load_supporting(st.session_state.case_id)]}
+                        for stale in ("identification", "labels"):
+                            st.session_state.pop(stale, None)
+                        st.rerun()
 
         if "identification" in st.session_state:
             show_key_facts(st.session_state.identification)
