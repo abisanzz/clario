@@ -86,6 +86,9 @@ def summarise(draft: dict, folder: Path | None = None) -> AssessmentSummary:
     cycle = current_cycle(case_id, folder)
     key = cycle_key(case_id, cycle)  # this review cycle's files
     decision = load_risk_decision(case_file(key, "risk-decision"))
+    # The rating counts only with an industry and checklist confirmed for the current documents: when the documents
+    # change, that choice is cleared to be confirmed again, and a rating saved before then no longer applies
+    rating = decision.rating if decision and checklist_key else ""
     approval = load_approval(case_file(key, "final-approval"))
     lines, validated, complete = 0, 0, 0
     if checklist_key in CHECKLISTS:
@@ -99,8 +102,8 @@ def summarise(draft: dict, folder: Path | None = None) -> AssessmentSummary:
                        if o.validated and o.status is Status.PRESENT and check_id in reviewed)
     manual = load_status(case_file(case_id, "status"))
     submitted = load_submission(case_id, cycle, folder) is not None
-    status = work_out_status(manual, approval.approved_on if approval else None, decision.rating if decision else "",
-                             bool(decision and checklist_key), lines, complete, submitted=submitted)
+    status = work_out_status(manual, approval.approved_on if approval else None, rating, bool(rating), lines, complete,
+                             submitted=submitted)
     # During a periodic review the next review date stays the one set by the last approval
     last = approved_snapshots(case_id, folder)
     if approval and decision:
@@ -112,7 +115,7 @@ def summarise(draft: dict, folder: Path | None = None) -> AssessmentSummary:
     return AssessmentSummary(
         case_id, cycle_review_id(case_id, cycle), draft["entity_name"] or "Unnamed entity", draft.get("company_link", ""),
         INDUSTRIES.get(industry_key, ""), CHECKLISTS[checklist_key][0] if checklist_key in CHECKLISTS else "",
-        decision.rating if decision else "", validated, lines, status, approval.approver if approval else "",
+        rating, validated, lines, status, approval.approver if approval else "",
         draft["saved_at"].replace("T", " ")[:16], manual.reason if manual else "", next_review, cycle,
         bool(lines) and complete >= lines, owner_of(draft), last_activity(draft), draft["review_id"],
     )

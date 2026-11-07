@@ -124,3 +124,12 @@ def test_last_activity_is_the_newest_change(folders):
     assert saved  # before anything is logged: when it was saved
     log_event(case_file(case_id, "audit").with_suffix(".jsonl"), "Abi San", "Validated a line")
     assert all_assessments(folders)[0].last_activity >= saved
+
+
+def test_a_rating_left_from_before_the_documents_changed_is_not_shown(folders):
+    case_id = make_case(folders)  # rated High, with an industry and checklist
+    # The documents changed: the industry and checklist choice is cleared, the saved rating is not
+    save_progress(case_id, "new pack", [], None, folder=folders)
+    [summary] = all_assessments(folders)
+    assert (summary.industry, summary.risk, summary.status) == ("", "", IN_PROGRESS)
+    assert not summary.needs_attention  # a High rating that no longer applies does not flag it
