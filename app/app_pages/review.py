@@ -1070,10 +1070,10 @@ if screen == "documents":
 
         # --- Add more documents: saved to the review's document store, then every document is read again ---
         if "identification" in st.session_state and st.session_state.get("case_id"):
-            with st.container(border=True):
-                st.subheader(":material/note_add: Add documents")
+            # A fold-out, minimised to start with; "\$" keeps the dollar signs from being read as a formula
+            with st.expander("**Add documents**", icon=":material/note_add:", expanded=False):
                 st.caption(f"Clario AI reads all {len(documents)} documents again with the new ones, so each "
-                           "document's type and the key facts update (about $0.10 to $0.15). The document types "
+                           "document's type and the key facts update (about \\$0.10 to \\$0.15). The document types "
                            "you corrected and your comments are kept.")
                 new_files = st.file_uploader("Documents to add", type=UPLOAD_TYPES, accept_multiple_files=True,
                                              key=f"add_to_pack_{pack_key}")
