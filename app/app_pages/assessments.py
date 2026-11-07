@@ -56,7 +56,6 @@ picked = st.dataframe(
         "Status": a.status,
         "Checklist": a.checklist or "Not set yet",  # its name gives the industry and risk level
         "Owner": a.owner,
-        "Lines validated": a.validated / a.lines if a.lines else 0.0,
         "Next review": a.next_review,
     } for a in rows]),
     hide_index=True,
@@ -69,8 +68,6 @@ picked = st.dataframe(
         "Status": st.column_config.TextColumn(width=104),
         "Checklist": st.column_config.TextColumn(width=305),  # wide enough for the whole name
         "Owner": st.column_config.TextColumn(width=120),
-        "Lines validated": st.column_config.ProgressColumn(format="percent", min_value=0.0, max_value=1.0,
-                                                           help="Checklist lines validated before approval"),
     },
 )
 # One place to open from, under the table: the entity found by search, or the row selected
