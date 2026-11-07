@@ -12,7 +12,14 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))  # so "services" and "app" can be imported when Streamlit runs this file
 
-from app.session import ASSESSMENT_PAGE, ASSESSMENTS_PAGE, TEAM, new_assessment, open_assessment  # noqa: E402
+from app.session import (  # noqa: E402
+    ASSESSMENT_PAGE,
+    ASSESSMENTS_PAGE,
+    STATUS_COLOURS,
+    TEAM,
+    new_assessment,
+    open_assessment,
+)
 from services.wording import product_voice  # noqa: E402
 from services.overview import (  # noqa: E402
     AI_PROCESSING,
@@ -25,19 +32,14 @@ from services.overview import (  # noqa: E402
 )
 from services.workflow import (  # noqa: E402
     STATUSES,
-    APPROVED,
-    CANCELLED,
     DEFINITIONS,
     IN_PROGRESS,
     NOT_STARTED,
     ON_HOLD,
     PENDING_APPROVAL,
-    REJECTED,
     UNDER_REVIEW,
 )
 
-STATUS_COLOURS = {NOT_STARTED: "gray", IN_PROGRESS: "blue", UNDER_REVIEW: "violet", PENDING_APPROVAL: "orange",
-                  APPROVED: "green", REJECTED: "red", ON_HOLD: "orange", CANCELLED: "gray"}
 RISK_COLOURS = {"Low": "green", "Medium": "orange", "High": "red"}
 ACTIVITY_ICONS = {DOCUMENT_UPLOAD: ":material/upload_file:", AI_PROCESSING: ":material/smart_toy:",
                   CREATION: ":material/add_circle:", ANALYST_ACTION: ":material/person:"}

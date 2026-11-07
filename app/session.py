@@ -3,6 +3,28 @@
 import streamlit as st
 
 from services.cases import load_case, load_progress, load_supporting
+from services.workflow import (
+    APPROVED,
+    CANCELLED,
+    DEFINITIONS,
+    IN_PROGRESS,
+    NOT_STARTED,
+    ON_HOLD,
+    PENDING_APPROVAL,
+    REJECTED,
+    STATUSES,
+    UNDER_REVIEW,
+)
+
+# Each review status's badge colour, the same on every page
+STATUS_COLOURS = {NOT_STARTED: "gray", IN_PROGRESS: "blue", UNDER_REVIEW: "violet", PENDING_APPROVAL: "orange",
+                  APPROVED: "green", REJECTED: "red", ON_HOLD: "orange", CANCELLED: "gray"}
+
+
+def status_guide() -> None:
+    """What each review status means: its badge, then its definition, in the order a review moves through."""
+    for status in STATUSES:
+        st.markdown(f":{STATUS_COLOURS[status]}-badge[{status}] {DEFINITIONS[status]}")
 
 # Made-up team members for the demo sign-in: no passwords, no real accounts
 TEAM = {

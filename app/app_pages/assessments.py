@@ -9,7 +9,7 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))  # so "services" and "app" can be imported when Streamlit runs this file
 
-from app.session import ASSESSMENT_PAGE, new_assessment, open_assessment  # noqa: E402
+from app.session import ASSESSMENT_PAGE, new_assessment, open_assessment, status_guide  # noqa: E402
 from services.overview import all_assessments  # noqa: E402
 
 st.title("Assessments")
@@ -40,6 +40,8 @@ with st.container(horizontal=True, vertical_alignment="bottom"):
     if st.button("New assessment", icon=":material/add:"):
         new_assessment()
         st.switch_page(ASSESSMENT_PAGE)
+    with st.popover("What the statuses mean", icon=":material/help:"):
+        status_guide()
 
 if not assessments:
     st.info("No assessments yet. Click **New assessment** to start one.", icon=":material/info:")
@@ -69,7 +71,8 @@ picked = st.dataframe(
     column_config={
         "Review ID": st.column_config.TextColumn(width=150),
         "Legal entity": st.column_config.TextColumn(width=250),
-        "Status": st.column_config.TextColumn(width=104),
+        "Status": st.column_config.TextColumn(
+            width=104, help="Where the review has got to. **What the statuses mean**, above the table, explains each one."),
         "Checklist": st.column_config.TextColumn(width=305),  # wide enough for the whole name
         "Owner": st.column_config.TextColumn(width=105),
         "Next review": st.column_config.TextColumn(width=100),

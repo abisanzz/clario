@@ -27,7 +27,7 @@ from services.companies_house import (  # noqa: E402
 )
 from services.extractor import ExtractionFailed  # noqa: E402
 from services.fca import FcaLookupFailed, FirmNotFound, get_firm, parse_frn  # noqa: E402
-from app.session import discard_unsaved, open_assessment, unsaved_summary  # noqa: E402
+from app.session import STATUS_COLOURS, discard_unsaved, open_assessment, unsaved_summary  # noqa: E402
 from services.overview import summarise  # noqa: E402
 from services.cycles import (  # noqa: E402
     approved_document,
@@ -49,15 +49,11 @@ from services.cycles import (  # noqa: E402
 )
 from services.workflow import (  # noqa: E402
     REVIEW_YEARS,
-    APPROVED,
     CANCELLED,
     DEFINITIONS,
-    IN_PROGRESS,
     NOT_STARTED,
     ON_HOLD,
-    PENDING_APPROVAL,
     REJECTED,
-    UNDER_REVIEW,
     clear_status,
     load_status,
     next_review_date,
@@ -688,8 +684,6 @@ if st.session_state.get("case_id"):
                ":material/cloud_done: All changes saved")
 
 # --- The assessment's status, and putting it on hold, cancelling, resuming or reopening it ---
-STATUS_COLOURS = {NOT_STARTED: "gray", IN_PROGRESS: "blue", UNDER_REVIEW: "violet", PENDING_APPROVAL: "orange",
-                  APPROVED: "green", REJECTED: "red", ON_HOLD: "orange", CANCELLED: "gray"}
 status_path = case_file(review_key, "status")
 this_case = next((d for d in list_cases() if d["id"] == st.session_state.get("case_id")), None)
 current = summarise(this_case) if this_case else None
