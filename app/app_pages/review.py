@@ -147,13 +147,23 @@ SAMPLE_COMPANY_NUMBER = "99999901"
 SAMPLE_FCA_FRN = "999999"  # the specimen FRN in the sample questionnaire; not on the FCA register
 UPLOAD_TYPES = UPLOAD_EXTENSIONS  # PDFs, images, Word, Excel, CSV, text, emails and web pages
 
-STATUS_TEXT = {
-    Status.PRESENT: "✅ Present",
-    Status.MISSING: "❌ Missing",
-    Status.UNCLEAR: "⚠️ Unclear",
-    Status.NEEDS_HUMAN_REVIEW: "🔎 Needs human review",
-    Status.NOT_STARTED: "⏳ Not started",
+STATUS_TEXT = {  # plain words: the status drop-down can't show icons
+    Status.PRESENT: "Present",
+    Status.MISSING: "Missing",
+    Status.UNCLEAR: "Unclear",
+    Status.NEEDS_HUMAN_REVIEW: "Needs human review",
+    Status.NOT_STARTED: "Not started",
 }
+STATUS_LOOK = {  # each status's colour and line icon, wherever Markdown is shown
+    Status.PRESENT: ("green", ":material/check_circle:"),
+    Status.MISSING: ("red", ":material/cancel:"),
+    Status.UNCLEAR: ("orange", ":material/warning:"),
+    Status.NEEDS_HUMAN_REVIEW: ("blue", ":material/person_search:"),
+    Status.NOT_STARTED: ("gray", ":material/hourglass_empty:"),
+}
+STATUS_ICON = {status: f":{colour}[{icon}]" for status, (colour, icon) in STATUS_LOOK.items()}
+STATUS_BADGE = {status: f":{colour}-badge[{icon} {STATUS_TEXT[status]}]"  # a coloured pill
+                for status, (colour, icon) in STATUS_LOOK.items()}
 TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
 STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
@@ -912,9 +922,18 @@ def as_written(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]<>()#+\-.!|~$:])", r"\\\1", text)
 
 
+class Shown(str):
+    """A table cell Clario wrote itself, with an icon: its Markdown is shown as it is, not escaped."""
+
+
+def with_icon(icon: str, text: str) -> Shown:
+    return Shown(f"{icon} {as_written(text)}")
+
+
 def fit_table(rows: list[dict]) -> None:
     """A small read-only table that wraps long text to fit the page, each cell shown as written."""
-    st.table(pd.DataFrame([{column: as_written(str(value)) for column, value in row.items()} for row in rows]),
+    st.table(pd.DataFrame([{column: value if isinstance(value, Shown) else as_written(str(value))
+                            for column, value in row.items()} for row in rows]),
              hide_index=True, border="horizontal")
 
 
@@ -961,8 +980,10 @@ def show_key_facts(identification) -> None:
             "Fact": c.fact,
             "Extracted": c.extracted or "—",
             "Found in": ", ".join(c.found_in) or "—",
-            "Across documents": (("✅ " if c.consistent else "⚠️ ") + c.cross_check) if c.found_in else "—",
-            "External verification": ("✅ " if c.externally_verified else "○ ") + c.external,
+            "Across documents": with_icon(STATUS_ICON[Status.PRESENT] if c.consistent else STATUS_ICON[Status.UNCLEAR],
+                                          c.cross_check) if c.found_in else "—",
+            "External verification": with_icon(STATUS_ICON[Status.PRESENT] if c.externally_verified
+                                               else ":gray[:material/radio_button_unchecked:]", c.external),
             "Assessment": c.assessment,
         } for c in checks])
         named = people(details)
@@ -1392,7 +1413,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         with st.container(border=True):
             text_side, status_side = st.columns([5, 2], vertical_alignment="center")
             text_side.markdown(f"**{line.id}** {line.check}")
-            status_side.markdown(f"**{STATUS_TEXT[status]}**")
+            status_side.markdown(STATUS_BADGE[status])
             st.caption(f":material/verified: Validated by {line.validated_by}" if line.validated_by
                        else ":material/remove_done: Not validated")
             clario_side, analyst_side = st.columns(2)
@@ -1536,7 +1557,7 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             ]:
                 with st.container(border=True, width=228, height=180, vertical_alignment="distribute"):
                     with st.container(gap=None):
-                        st.markdown(f"**{STATUS_TEXT[status]}**")
+                        st.markdown(STATUS_BADGE[status])
                         st.header(str(sum(o.status is status for o in review_outcomes)), anchor=False)
                         st.caption(short, help=help_text)
                     showing = line_filter == status.value
