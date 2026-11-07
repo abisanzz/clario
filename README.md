@@ -1,6 +1,6 @@
 # Clario: KYC document intelligence for UK onboarding
 
-Clario is an internal workspace for a KYC (know your customer) team onboarding UK financial services clients. An analyst adds a company's details and documents; Clario identifies each document, extracts the key facts, checks them against Companies House and the FCA register, suggests an industry and a risk rating, and checks the whole pack against a risk-based checklist. The analyst validates every line, submits the review, and senior management approves it. Approved reviews are frozen, then reviewed again on a schedule set by the risk rating.
+Clario is an internal workspace for a KYC (know your customer) team onboarding financial services clients. An analyst adds a company's details and documents; Clario identifies each document, extracts the key facts, checks them against Companies House and the FCA register, suggests an industry and a risk rating, and checks the whole pack against a risk-based checklist. The analyst validates every line, submits the review, and senior management approves it. Approved reviews are frozen, then reviewed again on a schedule set by the risk rating.
 
 ![The Clario dashboard: the team's assessments, filters and the priority work queue](docs/screenshots/dashboard.png)
 
