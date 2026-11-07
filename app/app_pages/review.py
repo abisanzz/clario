@@ -1694,6 +1694,58 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     lines = []  # (outcome, status, validated, comment, uploads, description) as shown on screen
     earlier = load_snapshot(review_key, cycle - 1) if cycle > 1 else None
     last_approved = {line.id: line for line in earlier.lines} if earlier else {}
+    PUBLIC_SOURCES = ("Companies House record", "FCA register record", "Company website")
+    entered_number = parse_company_number(company_link) or company_link.strip()
+    found_in_documents = identification.details if identification and identification.extracted else {}
+
+
+    def where(source: str) -> str:
+        """ "certificate.pdf p.1" -> "certificate.pdf, page 1" """
+        return re.sub(r" p\.(\d+)$", r", page \1", source)
+
+
+    def line_details(o) -> tuple[list[str], list[str], list[str]]:
+        """What one line rests on, as Markdown bullets: from the documents, from the public registers and website,
+        and provided by the analyst. Text from documents and registers is shown exactly as written."""
+        documents_said = [f"{label}: **{as_written(value)}**" + (f" · {as_written(where(source))}" if source else "")
+                          for label, value, source in named.line_facts(o.check.id)]
+        if o.check.section.startswith("3."):
+            documents_said += [f"Owner: **{as_written(name)}**, " + "; ".join(
+                f"{as_written(share)} · {as_written(', '.join(found_in))}" for share, found_in in shares.items())
+                for name, shares in owners(found_in_documents)]
+        if o.check.section.startswith("4."):
+            documents_said += [f"Person: **{as_written(name)}**" + (f", {as_written(', '.join(roles))}" if roles else "")
+                               + f" · {as_written(', '.join(found_in))}" for name, roles, found_in in people(found_in_documents)]
+        registers_said, document_names = [], {d.name for d in documents}
+        for item in o.evidence:
+            quoted = re.match(r'^(.*?)(?: p\.(\d+))?: "(.*)"$', item, re.S)
+            if not quoted:  # a reference the rules added, e.g. "Companies House API, checked 07 Nov 2026"
+                if not any(item.startswith(name) for name in document_names):  # a document is listed above
+                    registers_said.append(as_written(item))
+                continue
+            source, page, quote = quoted.groups()
+            if source in PUBLIC_SOURCES:  # a register or website has no pages
+                registers_said.append(f"“{as_written(quote)}” · {as_written(source)}")
+            else:
+                documents_said.append(f"“{as_written(quote)}” · {as_written(source)}" + (f", page {page}" if page else ""))
+        analyst_said = []
+        if o.check.id == "1.1" and entity_name.strip():
+            analyst_said.append(f"Legal entity name entered: **{as_written(entity_name.strip())}**")
+        if o.check.id in ("1.1", "1.3") and entered_number:
+            analyst_said.append(f"Company number entered: **{as_written(entered_number)}**")
+        if "FCA" in o.check.evidence_source and fca_frn.strip():
+            analyst_said.append(f"FCA firm reference number entered: **{as_written(fca_frn.strip())}**")
+        if "website" in o.check.evidence_source.lower() and website.strip():
+            analyst_said.append(f"Website entered: **{as_written(website.strip())}**")
+        for record in supporting_by_check.get(o.check.id, []):
+            analyst_said.append(
+                f"Supporting document: **{as_written(record['name'])}**"
+                + (f" ({as_written(record['description'])})" if record.get("description") else "")
+                + ", added" + (f" by {as_written(record['added_by'])}" if record["added_by"] else "")
+                + f" on {record['added_on']}"
+                + (f". Clario AI: {record['verdict']}. {as_written(record.get('verdict_finding', ''))}"
+                   if record.get("verdict") else ""))
+        return documents_said, registers_said, analyst_said
 
 
     def render_line(o) -> None:
@@ -1727,22 +1779,26 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 placeholder="Comment (required if you change the status)",
                 **starting("comment", {"value": o.reviewer_note}))
             with st.expander("Details"):
-                st.markdown(f"**Finding:** {o.finding}")
-                if o.claude_finding:
-                    st.markdown(f"**Clario AI's view:** {product_voice(o.claude_finding)}")
-                st.markdown(f"**Decided by:** {product_voice(o.decided_by)}"
-                            + (f" · **Validated by:** {o.validated_by}" if o.validated_by else ""))
-                if o.before_review:
-                    st.markdown(f"**Before the change:** {product_voice(o.before_review)}")
-                st.markdown("**Evidence:**" + ("".join(f"\n- {quote}" for quote in o.evidence)
-                                                if o.evidence else " none quoted"))
-                for record in supporting_by_check.get(o.check.id, []):
-                    st.caption(f":material/attach_file: Supporting document: {record['name']}"
-                               + (f" ({record['description']})" if record.get("description") else "")
-                               + ", added" + (f" by {record['added_by']}" if record["added_by"] else "")
-                               + f" on {record['added_on']}"
-                               + (f". Clario AI: {record['verdict']}. {record.get('verdict_finding', '')}"
-                                  if record.get("verdict") else ""))
+                documents_said, registers_said, analyst_said = line_details(o)
+                st.markdown("**:material/description: Extracted from the documents**")
+                if documents_said:
+                    st.markdown("\n".join(f"- {bullet}" for bullet in documents_said))
+                else:
+                    st.caption("Nothing was found in the documents for this line.")
+                if registers_said:
+                    st.markdown("**:material/account_balance: From the public registers and website**")
+                    st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
+                if analyst_said:
+                    st.markdown("**:material/person: Provided by the analyst**")
+                    st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
+                st.markdown("**:material/gavel: Clario's decision**")
+                st.markdown(f"- **Finding:** {o.finding}"
+                            + (f"\n- **Clario AI's view:** {product_voice(o.claude_finding)}" if o.claude_finding
+                               else "")
+                            + f"\n- **Decided by:** {product_voice(o.decided_by)}"
+                            + (f" · **Validated by:** {o.validated_by}" if o.validated_by else "")
+                            + (f"\n- **Before the change:** {product_voice(o.before_review)}" if o.before_review
+                               else ""))
             # Add a supporting document: upload, describe it and save, in a fold-out section
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
                 uploads = st.file_uploader(

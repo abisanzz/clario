@@ -396,6 +396,20 @@ class CheckOutcome:
     reviewer_note: str = ""  # the analyst's note on this line
 
 
+# Which labelled facts each legal-existence line rests on, with the label shown to the analyst
+LINE_FACTS = {
+    "1.1": [("Company name", "certificate_company_name"), ("Company number", "certificate_company_number"),
+            ("Incorporated", "certificate_incorporation_date")],
+    "1.2": [("Company name on the proof of address", "proof_of_address_company_name"),
+            ("Registered office", "proof_of_address_registered_office"),
+            ("Proof of address dated", "proof_of_address_date"),
+            ("Trades from the registered office", "trades_from_registered_office"),
+            ("Principal place of business", "principal_place_of_business")],
+    "1.4": [("Company name on the articles", "articles_company_name"),
+            ("Who can sign for the company", "articles_authority_summary")],
+}
+
+
 @dataclass(frozen=True)
 class PackAssessment:
     outcomes: list[CheckOutcome]
@@ -403,10 +417,26 @@ class PackAssessment:
     input_tokens: int = 0
     output_tokens: int = 0
     replayed: bool = False
+    facts: dict[str, Fact] = field(default_factory=dict)  # the labelled facts read for the Section 1 rules
 
     @property
     def cost_usd(self) -> float:
         return cost_usd(self.input_tokens, self.output_tokens)
+
+    def line_facts(self, check_id: str) -> list[tuple[str, str, str]]:
+        """The labelled facts read from the documents for one legal-existence line: (label, value, where found)."""
+        found = []
+        for label, key in LINE_FACTS.get(check_id, []):
+            fact = self.facts.get(key) or Fact()
+            value = fact.value
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                value = "Yes" if value else "No"
+            elif isinstance(value, date):
+                value = f"{value:%d %b %Y}"
+            found.append((label, str(value), fact.source))
+        return found
 
     def count(self, status: Status) -> int:
         return sum(1 for o in self.outcomes if o.status is status)
@@ -578,4 +608,4 @@ def assess_pack(
     if not replayed:
         save_answer(saved_answer, fingerprint, raw)
     input_tokens, output_tokens = tokens(usage)
-    return PackAssessment(outcomes, certificate, input_tokens, output_tokens, replayed)
+    return PackAssessment(outcomes, certificate, input_tokens, output_tokens, replayed, facts)

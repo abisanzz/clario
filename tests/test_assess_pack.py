@@ -340,3 +340,13 @@ def test_a_periodic_review_judges_the_evidence_as_at_its_date(tmp_path):
 
     again, claude = run(saved_answer=saved, review_date=date(2027, 11, 2))
     assert again.replayed and claude.requests == []  # reopening the same periodic review is free
+
+
+def test_each_legal_existence_line_lists_the_labelled_facts_it_rests_on():
+    result, _ = run()
+    assert result.line_facts("1.1") == [("Company name", "EXAMPLE PAYMENTS LTD", "cert.pdf p.1"),
+                                        ("Company number", "99999901", "cert.pdf p.1"),
+                                        ("Incorporated", "14 Mar 2019", "cert.pdf p.1")]
+    assert ("Trades from the registered office", "Yes", "questionnaire.pdf p.1") in result.line_facts("1.2")
+    assert ("Principal place of business" not in [label for label, _, _ in result.line_facts("1.2")])  # not found
+    assert result.line_facts("3.1") == []  # only the legal-existence lines have labelled facts
