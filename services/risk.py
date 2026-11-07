@@ -253,7 +253,7 @@ def save_risk_decision(path: Path, rating: str, suggested: str, reason: str, rev
         document, evidence_link = "", ""  # no override, so no sign-off evidence
     decision = RiskDecision(rating, suggested, reason.strip(), reviewer.strip(), (today or date.today()).isoformat(),
                             evidence_link=evidence_link.strip(), evidence_document=document)
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if evidence and rating != suggested:
         evidence_path(path).write_bytes(evidence[1])
     elif not document:

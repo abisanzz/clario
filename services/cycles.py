@@ -14,13 +14,14 @@ from datetime import date, datetime
 from pathlib import Path
 
 from services.cases import CASES_DIR, review_id
+from services.demo import visitor_space
 from services.checklist import Check
 from services.pack import CheckOutcome, PackAssessment, UploadedDocument
 from services.validator import Status
 
 
 def _folder(case_id: str, folder: Path | None) -> Path:
-    return (folder or CASES_DIR) / case_id
+    return (folder or visitor_space(CASES_DIR)) / case_id
 
 
 def current_cycle(case_id: str, folder: Path | None = None) -> int:

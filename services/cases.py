@@ -14,6 +14,7 @@ from pathlib import Path
 
 from services import reviews
 from services.companies_house import parse_company_number
+from services.demo import visitor_space
 from services.pack import DocumentLabel, UploadedDocument
 from services.validator import normalise_company_name
 from services.workflow import CANCELLED, load_status
@@ -31,7 +32,7 @@ def new_case_id() -> str:
 def _folder(case_id: str, folder: Path | None) -> Path:
     if not case_id or any(c not in "0123456789abcdef-" for c in case_id):
         raise ValueError(f"'{case_id}' is not a draft name")
-    return (folder or CASES_DIR) / case_id
+    return (folder or visitor_space(CASES_DIR)) / case_id
 
 
 def save_case(case_id: str, details: dict, documents: list[UploadedDocument], folder: Path | None = None) -> None:
@@ -159,7 +160,7 @@ def save_review(case_id: str | None, details: dict, documents: list[UploadedDocu
 def list_cases(folder: Path | None = None) -> list[dict]:
     """Every saved draft, most recently saved first: id, entity name, company, number of documents, saved at."""
     drafts = []
-    for case_file in (folder or CASES_DIR).glob("*/case.json"):
+    for case_file in (folder or visitor_space(CASES_DIR)).glob("*/case.json"):
         record = json.loads(case_file.read_text())
         drafts.append({
             "id": case_file.parent.name,

@@ -47,7 +47,7 @@ def set_status(path: Path, status: str, reason: str, by: str, today: date | None
     if not by.strip():
         raise ValueError("Give your name")
     change = StatusChange(status, reason.strip(), by.strip(), (today or date.today()).isoformat())
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(change), indent=2))
     return change
 

@@ -35,3 +35,71 @@ def test_saved_answers_still_replay_in_the_demo(monkeypatch, tmp_path):
     assert saved_or_ask(saved, "same input", ask) == ({"files": []}, None, True)
     with pytest.raises(ExtractionFailed):
         saved_or_ask(saved, "different input", ask)  # anything new stops with the demo message
+
+
+@pytest.fixture
+def spaces(tmp_path, monkeypatch):
+    """The demo's folders in a temporary place, and no visitor once the test ends."""
+    import services.cases as cases
+    import services.cycles as cycles
+    import services.reviews as reviews
+    from services.demo import use_visitor_from
+    monkeypatch.setattr(cases, "CASES_DIR", tmp_path / "cases")
+    monkeypatch.setattr(cycles, "CASES_DIR", tmp_path / "cases")
+    monkeypatch.setattr(reviews, "REVIEWS_DIR", tmp_path / "reviews")
+    yield tmp_path
+    use_visitor_from(None)
+
+
+def test_only_codes_clario_makes_are_accepted():
+    from services.demo import is_visitor_code, new_visitor_code
+    assert is_visitor_code(new_visitor_code())
+    for bad in ("", "../../etc", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "0123456789abcdeg"):
+        assert not is_visitor_code(bad), bad
+
+
+def test_each_visitor_starts_with_no_saved_reviews_and_never_sees_another(spaces):
+    from services.cases import find_case, list_cases, save_review
+    from services.demo import use_visitor_from
+    from services.pack import UploadedDocument
+    details = {"source": "Sample pack", "entity_name": "EXAMPLE PAYMENTS LTD", "company_link": "99999901"}
+    visitor = {"code": "a" * 16}
+    use_visitor_from(lambda: visitor["code"])
+    first = save_review(None, details, [UploadedDocument("cert.pdf", b"%PDF")])
+    assert [d["id"] for d in list_cases()] == [first]
+    assert (spaces / "cases" / "visitors" / ("a" * 16) / first).exists()
+    from services.audit import log_event
+    from services.reviews import case_file
+    log_event(case_file(first, "audit").with_suffix(".jsonl"), "A. Visitor", "Started")  # its folders are made
+    assert case_file(first, "audit").parent == spaces / "reviews" / "visitors" / ("a" * 16)
+    visitor["code"] = "b" * 16  # someone else
+    assert list_cases() == [] and find_case(details) is None  # a first-time visitor: nothing saved yet
+    second = save_review(None, details, [UploadedDocument("cert.pdf", b"%PDF")])
+    assert second != first  # their review does not replace the first visitor's
+    visitor["code"] = "a" * 16
+    assert [d["id"] for d in list_cases()] == [first]
+
+
+def test_outside_the_demo_the_normal_folders_are_used(spaces):
+    import services.cases as cases
+    from services.demo import use_visitor_from, visitor_space
+    use_visitor_from(None)
+    assert visitor_space(cases.CASES_DIR) == spaces / "cases"
+    use_visitor_from(lambda: "../not-a-code")  # a code that is not valid is never used as a folder
+    assert visitor_space(cases.CASES_DIR) == spaces / "cases"
+
+
+def test_spaces_nobody_has_used_for_a_day_are_cleared(tmp_path):
+    import os
+    import time
+    from services.demo import clear_old_visitors
+    old, recent = tmp_path / "visitors" / ("a" * 16), tmp_path / "visitors" / ("b" * 16)
+    for space in (old, recent):
+        (space / "review").mkdir(parents=True)
+        (space / "review" / "case.json").write_text("{}")
+    (tmp_path / "visitors" / "not-a-visitor").mkdir()
+    two_days_ago = time.time() - 48 * 3600
+    for path in [old, *old.rglob("*")]:
+        os.utime(path, (two_days_ago, two_days_ago))
+    assert clear_old_visitors([tmp_path]) == ["a" * 16]
+    assert not old.exists() and recent.exists() and (tmp_path / "visitors" / "not-a-visitor").exists()

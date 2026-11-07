@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
 
+from services.demo import visitor_space
 from services.pack import PackAssessment
 from services.validator import Status
 
@@ -41,7 +42,7 @@ class Override:
 def case_file(pack_key: str, checklist: str, folder: Path | None = None) -> Path:
     """Where one case's changes are saved: one file per set of documents and checklist."""
     name = hashlib.sha256(f"{pack_key}|{checklist}".encode()).hexdigest()[:16]
-    return (folder or REVIEWS_DIR) / f"{name}.json"
+    return (folder or visitor_space(REVIEWS_DIR)) / f"{name}.json"
 
 
 def load_overrides(path: Path) -> dict[str, Override]:
@@ -57,7 +58,7 @@ def load_overrides(path: Path) -> dict[str, Override]:
 
 
 def _write(path: Path, overrides: dict[str, Override]) -> None:
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         check_id: {**asdict(o), "status": o.status.value, "original_status": o.original_status.value}
         for check_id, o in overrides.items()
@@ -159,7 +160,7 @@ def approve_review(path: Path, approver: str, note: str = "", today: date | None
     if not approver.strip():
         raise ValueError("Give the senior manager's name")
     approval = FinalApproval(approver.strip(), (today or date.today()).isoformat(), note.strip())
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(approval), indent=2))
     return approval
 

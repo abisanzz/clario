@@ -24,7 +24,7 @@ class AuditEvent:
 def log_event(path: Path, who: str, what: str, line: str = "", when: datetime | None = None) -> AuditEvent:
     """Add one entry to the review's audit log."""
     event = AuditEvent((when or datetime.now()).strftime("%Y-%m-%d %H:%M:%S"), who.strip() or NO_NAME, line, what)
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as log:
         log.write(json.dumps(asdict(event)) + "\n")
     return event

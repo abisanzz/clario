@@ -23,8 +23,20 @@ from app.session import (  # noqa: E402
     open_assessment,
     unsaved_summary,
 )
-from services.cases import list_cases  # noqa: E402
-from services.demo import is_demo  # noqa: E402
+from services.cases import CASES_DIR, list_cases  # noqa: E402
+from services.demo import clear_old_visitors, is_demo, is_visitor_code, new_visitor_code, use_visitor_from  # noqa: E402
+from services.reviews import REVIEWS_DIR  # noqa: E402
+
+# The public demo: each visitor works in their own space, so they start with no saved reviews and never see anyone
+# else's. Their visitor code is kept in the browser session and in the page address, so a refresh keeps their work.
+if is_demo():
+    visitor = st.session_state.get("visitor") or st.query_params.get("visitor", "")
+    if not is_visitor_code(visitor):
+        visitor = new_visitor_code()
+        clear_old_visitors([CASES_DIR, REVIEWS_DIR])  # spaces nobody has used for a day
+    st.session_state.visitor = visitor
+    st.query_params["visitor"] = visitor
+use_visitor_from((lambda: st.session_state.get("visitor")) if is_demo() else None)
 
 st.set_page_config(page_title="Clario", page_icon=str(ASSETS / "clario-icon.svg"), layout="wide")
 st.logo(str(ASSETS / "clario-logo.svg"), icon_image=str(ASSETS / "clario-icon.svg"), size="large")
@@ -176,7 +188,7 @@ with st.sidebar:
     st.button("Sign out", icon=":material/logout:", type="tertiary", on_click=sign_out)
     if is_demo():
         st.caption(":material/science: **Public demo.** Start a new assessment to try the example case. Uploads and "
-                   "new AI readings are switched off, and everyone shares the same data, which resets now and then.")
+                   "new AI readings are switched off. Your reviews are yours alone and are cleared after a day.")
 
 
 @st.dialog("Unsaved changes", icon=":material/warning:", dismissible=False, width="medium")
@@ -203,6 +215,8 @@ if st.session_state.get("unsaved_lines") and page.url_path not in ("assessment",
     st.stop()  # the chosen page opens once the user has decided
 
 st.query_params["user"] = st.session_state.user
+if is_demo():
+    st.query_params["visitor"] = st.session_state.visitor  # moving between pages can clear the address
 for name, value in (("case", st.session_state.get("case_id")), ("tab", st.session_state.get("current_tab"))):
     if value:
         st.query_params[name] = value
