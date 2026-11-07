@@ -6,14 +6,17 @@ hold client documents and must not be committed.
 """
 
 import json
+import re
 import secrets
 import shutil
 from datetime import datetime
 from pathlib import Path
 
+from services import reviews
 from services.companies_house import parse_company_number
 from services.pack import DocumentLabel, UploadedDocument
 from services.validator import normalise_company_name
+from services.workflow import CANCELLED, load_status
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
 DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn", "country", "registration_number",
@@ -113,12 +116,21 @@ def find_by_review_id(text: str, folder: Path | None = None) -> str | None:
 
 
 def entity_key(details: dict) -> str:
-    """What identifies the legal entity: its company number, or else its name ("" if neither is given)."""
+    """What identifies the legal entity: its company number, or else its name ("" if neither is given). A name is
+    the same company with or without a closing "Limited" or "Ltd", e.g. "Sterling Asset Management" and "Sterling
+    Asset Management Limited"."""
     number = parse_company_number(details.get("company_link", ""))
     if number:
         return f"company:{number}"
-    name = normalise_company_name(details.get("entity_name", ""))
+    name = re.sub(r"\s+LTD$", "", normalise_company_name(details.get("entity_name", "")))
     return f"name:{name}" if name else ""
+
+
+def is_cancelled(case_id: str) -> bool:
+    """A review a person marked Cancelled, e.g. as a duplicate: it is kept as a record, apart from the one-review-per-
+    entity rule, so it is never hidden behind, replaced by or merged into another review."""
+    status = load_status(reviews.case_file(case_id, "status"))
+    return bool(status and status.status == CANCELLED)
 
 
 def find_case(details: dict, folder: Path | None = None) -> dict | None:
@@ -153,7 +165,8 @@ def list_cases(folder: Path | None = None) -> list[dict]:
             "id": case_file.parent.name,
             "review_id": review_id(case_file.parent.name),
             "entity_name": record["details"].get("entity_name", ""),
-            "entity_key": entity_key(record["details"]),
+            # a cancelled review stands on its own (see is_cancelled)
+            "entity_key": "" if is_cancelled(case_file.parent.name) else entity_key(record["details"]),
             "company_link": record["details"].get("company_link", ""),
             "owner": record["details"].get("owner", ""),
             "documents": len(record["documents"]),

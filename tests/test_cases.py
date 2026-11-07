@@ -111,6 +111,33 @@ def test_older_duplicates_are_removed_when_the_entity_is_saved(tmp_path):
     assert [d["id"] for d in list_cases(folder=tmp_path)] == ["20261027-bbbbbbbb"]
 
 
+def test_a_name_with_or_without_limited_is_the_same_company(tmp_path):
+    from services.cases import save_review
+    no_number = {**DETAILS, "company_link": ""}
+    first = save_review(None, {**no_number, "entity_name": "Smith Trading"}, [CERT], folder=tmp_path)
+    assert save_review(None, {**no_number, "entity_name": "Smith Trading Limited"}, [BILL], folder=tmp_path) == first
+    assert save_review(None, {**no_number, "entity_name": "Smith Trading Ltd."}, [BILL], folder=tmp_path) == first
+    other = save_review(None, {**no_number, "entity_name": "Smith Trading Group Limited"}, [BILL], folder=tmp_path)
+    assert other != first and len(list_cases(folder=tmp_path)) == 2
+
+
+def test_a_cancelled_duplicate_is_kept_as_a_record(tmp_path, monkeypatch):
+    import services.reviews as reviews
+    from services.cases import find_case, latest_reviews, save_review
+    from services.workflow import CANCELLED, set_status
+    monkeypatch.setattr(reviews, "REVIEWS_DIR", tmp_path / "reviews")
+    no_number = {**DETAILS, "company_link": ""}
+    duplicate = save_review(None, {**no_number, "entity_name": "Sterling Asset Management"}, [CERT], folder=tmp_path)
+    set_status(reviews.case_file(duplicate, "status"), CANCELLED, "Duplicate of the Limited review", "A. Analyst")
+    kept = save_review(None, {**no_number, "entity_name": "Sterling Asset Management Limited"}, [CERT, BILL],
+                       folder=tmp_path)
+    assert kept != duplicate  # a new review is not merged into the cancelled one
+    save_review(kept, {**no_number, "entity_name": "Sterling Asset Management Limited"}, [CERT], folder=tmp_path)
+    assert (tmp_path / duplicate).exists()  # saving the active review does not delete the cancelled one
+    assert {d["id"] for d in latest_reviews(folder=tmp_path)} == {duplicate, kept}  # both listed
+    assert find_case({"entity_name": "Sterling Asset Management"}, folder=tmp_path)["id"] == kept
+
+
 def test_a_review_with_no_name_or_number_is_never_merged(tmp_path):
     from services.cases import save_review
     blank = {**DETAILS, "company_link": "", "entity_name": ""}
