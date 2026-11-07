@@ -459,11 +459,15 @@ def details_tab() -> None:
                                             index=CUSTOMER_TYPES.index(known_type) if known_type in CUSTOMER_TYPES
                                             else 0)
 
-        source = st.segmented_control(
-            "Documents", ["Upload documents", "Sample pack"], default=saved.get("source", "Upload documents"),
-            key="source",
-            format_func=lambda choice: {"Sample pack": "Example case", "Upload documents": "Client documents"}[choice],
-        ) or "Upload documents"
+        if st.session_state.get("case_id"):  # a saved review keeps its own documents: no switching to the example
+            source = saved.get("source") or "Upload documents"
+            st.markdown("**Documents**")
+        else:  # a new assessment: the client's documents, or the example case for training and walkthroughs
+            source = st.segmented_control(
+                "Documents", ["Upload documents", "Sample pack"], default=saved.get("source", "Upload documents"),
+                key="source",
+                format_func=lambda choice: {"Sample pack": "Example case", "Upload documents": "Client documents"}[choice],
+            ) or "Upload documents"
         if source == "Sample pack":
             documents = SAMPLE_DOCUMENTS
             st.caption(
