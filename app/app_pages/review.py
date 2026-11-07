@@ -1704,18 +1704,46 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
         return re.sub(r" p\.(\d+)$", r", page \1", source)
 
 
-    def line_details(o) -> tuple[list[str], list[str], list[str]]:
-        """What one line rests on, as Markdown bullets: from the documents, from the public registers and website,
-        and provided by the analyst. Text from documents and registers is shown exactly as written."""
-        documents_said = [f"{label}: **{as_written(value)}**" + (f" · {as_written(where(source))}" if source else "")
-                          for label, value, source in named.line_facts(o.check.id)]
+    # The facts compared across documents on Document intelligence, and the line each belongs to, with its label there
+    KEY_FACT_LINES = {"1.1": {"Company name": "Company name", "Registration number": "Company number"},
+                      "1.2": {"Registered address": "Registered office"}}
+
+
+    def without_page(source: str) -> str:
+        return re.sub(r", page \d+$", "", source)
+
+
+    def line_details(o) -> tuple[list[list], list[str], list[str]]:
+        """What one line rests on: from the documents, one row per value as [label, value, where found, documents
+        disagree], so a value found in several documents is one row listing them all; then the public registers
+        and website, and what the analyst provided, as Markdown bullets. Text from documents is shown as written."""
+        rows: dict[tuple[str, str], list] = {}
+
+        def add(label: str, value: str, source: str, disagree: bool = False) -> None:
+            row = rows.setdefault((label, normalise(value)), [label, value, [], disagree])
+            if source in row[2] or any(without_page(listed) == source for listed in row[2]):
+                return  # already listed (with its page)
+            if source != without_page(source) and without_page(source) in row[2]:
+                row[2][row[2].index(without_page(source))] = source  # now with its page
+                return
+            row[2].append(source)
+
+        for fact in key_facts(found_in_documents):
+            label = KEY_FACT_LINES.get(o.check.id, {}).get(fact.fact)
+            for value, found_in in (fact.values.items() if label else []):
+                for name in found_in:
+                    add(label, value, name, fact.disagree)
+        for label, value, source in named.line_facts(o.check.id):
+            add(label, value, where(source))
         if o.check.section.startswith("3."):
-            documents_said += [f"Owner: **{as_written(name)}**, " + "; ".join(
-                f"{as_written(share)} · {as_written(', '.join(found_in))}" for share, found_in in shares.items())
-                for name, shares in owners(found_in_documents)]
+            for name, shares in owners(found_in_documents):
+                for share, found_in in shares.items():
+                    for document in found_in:
+                        add(f"Owner {name}", share, document, len(shares) > 1)
         if o.check.section.startswith("4."):
-            documents_said += [f"Person: **{as_written(name)}**" + (f", {as_written(', '.join(roles))}" if roles else "")
-                               + f" · {as_written(', '.join(found_in))}" for name, roles, found_in in people(found_in_documents)]
+            for name, roles, found_in in people(found_in_documents):
+                for document in found_in:
+                    add(f"Person {name}", ", ".join(roles) or "named", document)
         registers_said, document_names = [], {d.name for d in documents}
         for item in o.evidence:
             quoted = re.match(r'^(.*?)(?: p\.(\d+))?: "(.*)"$', item, re.S)
@@ -1726,8 +1754,12 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             source, page, quote = quoted.groups()
             if source in PUBLIC_SOURCES:  # a register or website has no pages
                 registers_said.append(f"“{as_written(quote)}” · {as_written(source)}")
-            else:
-                documents_said.append(f"“{as_written(quote)}” · {as_written(source)}" + (f", page {page}" if page else ""))
+            else:  # a quote that is a value already listed joins that row, e.g. the company name on the certificate
+                same = next((row for (label, value), row in rows.items()
+                             if label != "Quoted" and value == normalise(quote)), None)
+                add(same[0] if same else "Quoted", same[1] if same else quote,
+                    f"{source}, page {page}" if page else source, same[3] if same else False)
+        documents_said = list(rows.values())
         analyst_said = []
         if o.check.id == "1.1" and entity_name.strip():
             analyst_said.append(f"Legal entity name entered: **{as_written(entity_name.strip())}**")
@@ -1780,17 +1812,6 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                 **starting("comment", {"value": o.reviewer_note}))
             with st.expander("Details"):
                 documents_said, registers_said, analyst_said = line_details(o)
-                st.markdown("**:material/description: Extracted from the documents**")
-                if documents_said:
-                    st.markdown("\n".join(f"- {bullet}" for bullet in documents_said))
-                else:
-                    st.caption("Nothing was found in the documents for this line.")
-                if registers_said:
-                    st.markdown("**:material/account_balance: From the public registers and website**")
-                    st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
-                if analyst_said:
-                    st.markdown("**:material/person: Provided by the analyst**")
-                    st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
                 st.markdown("**:material/gavel: Clario's decision**")
                 st.markdown(f"- **Finding:** {o.finding}"
                             + (f"\n- **Clario AI's view:** {product_voice(o.claude_finding)}" if o.claude_finding
@@ -1799,6 +1820,26 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
                             + (f" · **Validated by:** {o.validated_by}" if o.validated_by else "")
                             + (f"\n- **Before the change:** {product_voice(o.before_review)}" if o.before_review
                                else ""))
+                st.markdown("**:material/description: Extracted from the documents**")
+                if not documents_said:
+                    st.caption("Nothing was found in the documents for this line.")
+                for number, (label, value, sources, disagree) in enumerate(documents_said):
+                    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                        shown = f"“{as_written(value)}”" if label == "Quoted" else f"**{as_written(value)}**"
+                        st.markdown((":orange[:material/warning:] " if disagree else "")
+                                    + f"{as_written(label)}: {shown}"
+                                    + (" · :orange[documents disagree]" if disagree else ""), width="stretch")
+                        count = len({without_page(source) for source in sources})
+                        with st.popover(f"{count} document{'s' if count > 1 else ''}", type="tertiary",
+                                        icon=":material/find_in_page:", help="Where this was found",
+                                        key=f"where_{key}_{number}"):
+                            st.markdown("\n".join(f"- {as_written(source)}" for source in sources))
+                if registers_said:
+                    st.markdown("**:material/account_balance: From the public registers and website**")
+                    st.markdown("\n".join(f"- {bullet}" for bullet in registers_said))
+                if analyst_said:
+                    st.markdown("**:material/person: Provided by the analyst**")
+                    st.markdown("\n".join(f"- {bullet}" for bullet in analyst_said))
             # Add a supporting document: upload, describe it and save, in a fold-out section
             with st.expander("Upload supporting document", icon=":material/attach_file:"):
                 uploads = st.file_uploader(
