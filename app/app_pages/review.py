@@ -65,7 +65,6 @@ from services.workflow import (  # noqa: E402
 )
 from services.audit import describe_line_change, events_csv, load_events, log_event  # noqa: E402
 from services.cases import (  # noqa: E402
-    CUSTOMER_TYPES,
     DETAIL_FIELDS,
     add_supporting_document,
     answer_paths,
@@ -450,15 +449,6 @@ def details_tab() -> None:
                     open_assessment(existing["id"])
                     st.rerun()
 
-        reference_side, type_side = st.columns(2)
-        customer_reference = reference_side.text_input(
-            "Customer reference", value=saved.get("customer_reference", ""), key="customer_reference",
-            placeholder="e.g. CUST-00123", help="Your firm's own reference for this customer.")
-        known_type = saved.get("customer_type") or CUSTOMER_TYPES[0]
-        customer_type = type_side.selectbox("Customer type", CUSTOMER_TYPES, key="customer_type",
-                                            index=CUSTOMER_TYPES.index(known_type) if known_type in CUSTOMER_TYPES
-                                            else 0)
-
         if st.session_state.get("case_id"):  # a saved review keeps its own documents: no switching to the example
             source = saved.get("source") or "Upload documents"
             st.markdown("**Documents**")
@@ -509,8 +499,7 @@ def details_tab() -> None:
 
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
                "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
-               "stated_industry": stated_industry, "owner": owner.strip(),
-               "customer_reference": customer_reference.strip(), "customer_type": customer_type}
+               "stated_industry": stated_industry, "owner": owner.strip()}
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:", disabled=not owner.strip()):
             save_draft(details, documents)

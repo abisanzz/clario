@@ -14,7 +14,7 @@ TEAM = {
 ASSESSMENT_PAGE = "app_pages/review.py"
 ASSESSMENTS_PAGE = "app_pages/assessments.py"
 WIDGET_PREFIXES = ("entity_name_", "company_link_", "website_", "fca_", "country_", "registration_", "stated_industry_",
-                   "owner", "source", "customer_")
+                   "owner", "source")
 REVIEW_STATE = ("identification", "labels", "label_comments", "label_corrections", "industry", "choice", "assessment",
                 "pack_key", "risk", "section_reads", "line_versions", "delete_pending", "line_filter", "unsaved_lines",
                 "leave_to")
