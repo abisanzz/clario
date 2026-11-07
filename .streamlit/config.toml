@@ -1,4 +1,4 @@
-# Clario theme: a near-black workspace with a purple accent, and a matching light version.
+# Clario theme: a navy workspace with a purple accent, and a matching light version.
 # Each user picks Light, Dark or their system setting from the menu (top right, ⋮ › Settings).
 
 [theme]
@@ -15,17 +15,17 @@ linkUnderline = false
 
 [theme.dark]
 primaryColor = "#6D5DE7"            # purple: buttons and active elements (white text stays readable)
-backgroundColor = "#0E0F14"         # near-black page
-secondaryBackgroundColor = "#171A26"  # cards, inputs and table cells
-textColor = "#E8E9F0"
-borderColor = "#262A3A"
+backgroundColor = "#223559"         # navy page, the same as the sidebar
+secondaryBackgroundColor = "#2E436A"  # slate navy cards, inputs and table cells (dark enough for readable captions)
+textColor = "#F8FAFC"               # near-white
+borderColor = "#4A5E85"
 linkColor = "#C9C2FF"
 codeTextColor = "#C9C2FF"           # review IDs and other code-style text
-codeBackgroundColor = "#1C1F2D"
-dataframeBorderColor = "#262A3A"
-dataframeHeaderBackgroundColor = "#1C1F2D"
+codeBackgroundColor = "#2B4068"
+dataframeBorderColor = "#4A5E85"
+dataframeHeaderBackgroundColor = "#2B4068"
 
-# Status badge colours: lighter tints, readable on near-black
+# Status badge colours: lighter tints, readable on navy
 greenColor = "#5FD39A"
 orangeColor = "#F5C46B"
 redColor = "#FF9B8A"
@@ -34,11 +34,11 @@ violetColor = "#C9C2FF"
 grayColor = "#9097AE"
 
 [theme.dark.sidebar]
-backgroundColor = "#14161F"         # a shade lighter than the page
-secondaryBackgroundColor = "#252846"  # the selected menu item
-textColor = "#C3C7D6"
-borderColor = "#232634"
-primaryColor = "#C9C2FF"            # light purple, readable on the dark sidebar
+backgroundColor = "#223559"         # navy
+secondaryBackgroundColor = "#2E436A"  # the selected menu item
+textColor = "#F8FAFC"
+borderColor = "#4A5E85"
+primaryColor = "#C9C2FF"            # light purple, readable on navy
 
 [theme.light]
 primaryColor = "#5B4BD6"            # deeper purple, so white button text stays readable
