@@ -1266,10 +1266,17 @@ if screen == "assess":
                     index=industry_options.index(chosen_industry), key=f"industry_{hash(links_key)}",
                     help="Change this if the suggested industry is wrong.",
                 )]
+                industry_changed = industry != suggestion.industry
+                if industry_changed:
+                    st.badge("Selected by the analyst", icon=":material/person:", color="blue")
                 if is_demo():
                     st.caption(":material/science: In the public demo you can choose the industries Clario's answers "
                                "for the example case were recorded for.")
                 with st.expander("Why this industry?"):
+                    if industry_changed:
+                        st.info(f"**Selected by the analyst: {INDUSTRIES[industry]}.** Clario suggested "
+                                f"{suggestion.industry_label}; its reasons for that suggestion are below.",
+                                icon=":material/person:")
                     st.markdown(suggestion.reason)
                     if suggestion.sources_agree == "no":
                         st.warning(f"**The sources disagree.** {suggestion.disagreement}", icon=":material/warning:")
@@ -1322,8 +1329,12 @@ if screen == "assess":
             if not written_for_industry:
                 st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
             with st.expander("Why this checklist?"):
-                st.markdown(f"Set from the industry (**{INDUSTRIES[industry]}**) and the risk rating (**{final}**).  \n"
-                            f"{LEVEL_MEANING[final]}")
+                industry_by = (f", selected by the analyst; Clario suggested {suggestion.industry_label}"
+                               if industry_changed else ", as Clario suggested")
+                rating_by = (f", overridden by the analyst; Clario suggested {risk.overall}"
+                             if final != risk.overall else ", as Clario suggested")
+                st.markdown(f"Set from the industry (**{INDUSTRIES[industry]}**{industry_by}) and the risk rating "
+                            f"(**{final}**{rating_by}).  \n{LEVEL_MEANING[final]}")
                 st.caption(f"{checklist_size(checklist)} checks.")
                 if not written_for_industry:
                     st.caption("There is no checklist written for this industry yet, so the fintech one is used.")
@@ -1579,7 +1590,9 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
             with st.container():
                 st.caption("Checklist")
                 st.markdown(f"#### {CHECKLISTS[checklist][0]}")
-                st.caption(f"{len(result.outcomes)} checks · Industry: {INDUSTRIES[industry]}")
+                st.caption(f"{len(result.outcomes)} checks · Industry: {INDUSTRIES[industry]}"
+                           + (f", selected by the analyst (Clario suggested {suggestion.industry_label})"
+                              if industry != suggestion.industry else ""))
                 if decision.overridden:
                     st.caption(f"Risk rating overridden from {decision.suggested}; signed off by {decision.reviewer}, AML "
                                "senior officer")
