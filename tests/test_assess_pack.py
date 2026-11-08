@@ -306,16 +306,28 @@ def test_entity_name_that_differs_makes_1_1_unclear_and_a_register_gap():
     assert "1.1" in [g.check.id for g in named.request_from_client() + named.check_on_registers()]
 
 
-def test_entity_name_not_compared_leaves_the_status_alone():
-    from services.pack import apply_entity_name
+def _not_found(number):
+    raise CompanyNotFound(number)
 
-    def not_found(number):
-        raise CompanyNotFound(number)
+
+def test_entity_name_not_on_companies_house_is_compared_with_the_certificate():
+    from services.pack import apply_entity_name
     result, _ = run()
-    named = apply_entity_name(result, "Anything Ltd", "99999901", lookup=not_found)
-    assert outcome(named, "1.1").status is Status.PRESENT
-    assert "not compared" in outcome(named, "1.1").finding
+    named = apply_entity_name(result, "Anything Ltd", "99999901", lookup=_not_found)
+    o = outcome(named, "1.1")
+    assert o.status is Status.UNCLEAR
+    assert "not on Companies House" in o.finding
+    assert "does not match the certificate of incorporation (EXAMPLE PAYMENTS LTD)" in o.finding
     assert apply_entity_name(result, "  ", "99999901") is result  # nothing entered, nothing changed
+
+
+def test_entity_name_matching_the_certificate_keeps_1_1_present():
+    from services.pack import apply_entity_name
+    result, _ = run()
+    named = apply_entity_name(result, "Example Payments Limited", "99999901", lookup=_not_found)
+    o = outcome(named, "1.1")
+    assert o.status is Status.PRESENT
+    assert "matches the certificate of incorporation (EXAMPLE PAYMENTS LTD)" in o.finding
 
 
 def test_a_section_can_be_re_run_on_its_own():

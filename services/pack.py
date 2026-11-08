@@ -32,6 +32,7 @@ from services.validator import (
     check_1_2,
     check_1_3,
     check_1_4,
+    entity_name_matches,
     entity_name_rule,
 )
 
@@ -456,10 +457,20 @@ class PackAssessment:
 
 def apply_entity_name(assessment: PackAssessment, entered: str, company_number: str | None,
                       lookup=None) -> PackAssessment:
-    """Add the legal entity name rule to check 1.1: a name that does not match Companies House makes it Unclear."""
+    """Add the legal entity name rule to check 1.1: a name that does not match Companies House makes it Unclear.
+    When Companies House cannot confirm it (not found, no number or no answer), the name on the certificate of
+    incorporation is used instead, so a mismatch still shows on the checklist."""
     if not entered.strip():
         return assessment
     matches, note = entity_name_rule(entered, company_number, **({"lookup": lookup} if lookup else {}))
+    on_certificate = assessment.certificate.company_name.value if assessment.certificate else None
+    if matches is None and isinstance(on_certificate, str) and on_certificate.strip():
+        matches = entity_name_matches(entered, on_certificate)
+        why_not_registry = note.split("not compared: ", 1)[-1]
+        note = (f"Legal entity name entered ({' '.join(entered.split())}) "
+                + ("matches" if matches else "does not match")
+                + f" the certificate of incorporation ({on_certificate}); not checked on Companies House: "
+                + why_not_registry)
     outcomes = []
     for outcome in assessment.outcomes:
         if outcome.check.id == "1.1":
