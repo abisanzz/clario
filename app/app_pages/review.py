@@ -1324,9 +1324,6 @@ if screen == "assess":
             st.markdown(f"#### {CHECKLISTS[checklist][0]}")
             if not written_for_industry:
                 st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
-                if is_demo():
-                    st.caption(f":material/info: Not a demo limitation: Clario has no checklist written for "
-                               f"{INDUSTRIES[industry]} yet, so it uses the fintech one.")
             if demo_unavailable:
                 ready = demo_ready_industries(final)
                 st.info(f"**Not available in the public demo.** The {CHECKLISTS[checklist][0]} checklist exists, but "
