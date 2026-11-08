@@ -66,19 +66,35 @@ def sign_in() -> None:
         st.caption(":material/info: Demo environment: choose a team member to continue. No password is needed.")
         if is_demo():  # a first-time visitor's route to the findings, and what to look for there
             with st.container(border=True):
-                st.markdown("**:material/route: Try it in five steps**")
+                st.subheader("Explore Clario in five steps", anchor=False)
                 st.markdown(
-                    "1. Choose any team member and press **Sign in**.\n"
-                    "2. Click **New assessment**. The example company, EXAMPLE PAYMENTS LTD, is filled in: press "
-                    "**Save and continue**.\n"
-                    "3. **Document intelligence**: Clario has identified each document and compared the key facts. "
-                    "Press **Next**.\n"
-                    "4. **Risk assessment**: Clario suggests the industry and a risk rating. Press **Next**.\n"
-                    "5. **Evidence review**: every checklist line, with what is present, missing or unclear. Open a "
-                    "line's **Details** to see the evidence behind it.")
-                st.caption("Look for the problems planted in the example: the FCA firm reference 999999 is not on the "
-                           "FCA register (check 2.1), the documents disagree on a shareholding, 25% against 28% "
-                           "(check 3.2), and the company number is not on Companies House (check 1.3).")
+                    "Follow this quick walkthrough to see how Clario supports a KYC assessment, from document "
+                    "analysis to evidence review.\n\n"
+                    "**1. Sign in**\n\n"
+                    "Choose any team member from the list and click **Sign in** to enter the application.\n\n"
+                    "**2. Start an assessment**\n\n"
+                    "Select **New assessment**. An example company, **EXAMPLE PAYMENTS LTD**, is already populated "
+                    "with sample information. Click **Save and continue** to begin.\n\n"
+                    "**3. Explore document intelligence**\n\n"
+                    "See how Clario identifies the documents in the pack, extracts key information and highlights any "
+                    "inconsistencies. Click **Next** to continue.\n\n"
+                    "**4. Review the risk assessment**\n\n"
+                    "Explore Clario's suggested industry classification and risk rating, along with the supporting "
+                    "rationale. Click **Next** to continue.\n\n"
+                    "**5. Examine the evidence**\n\n"
+                    "Review the KYC checklist to see which requirements are supported by evidence, missing or "
+                    "unclear. Expand **Details** on any checklist item to see the supporting evidence and understand "
+                    "how Clario reached its assessment.")
+                st.divider()
+                st.markdown(
+                    "**Look out for three examples of potential issues identified in the sample assessment:**\n\n"
+                    "- **FCA registration:** Firm reference number 999999 cannot be found on the FCA register "
+                    "(check 2.1).\n"
+                    "- **Ownership discrepancy:** Two documents show different shareholdings – 25% and 28% "
+                    "(check 3.2).\n"
+                    "- **Companies House:** The company's registration number cannot be found on Companies House "
+                    "(check 1.3).\n\n"
+                    "See if you can spot all three as you explore Clario.")
 
 
 def sign_out() -> None:
