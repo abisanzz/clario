@@ -21,7 +21,7 @@ from services.workflow import CANCELLED, load_status
 
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
 DETAIL_FIELDS = ("source", "entity_name", "company_link", "website", "fca_frn", "country", "registration_number",
-                 "stated_industry", "owner")  # owner: whoever created the assessment, until an analyst reassigns it
+                 "owner")  # owner: whoever created the assessment, until an analyst reassigns it
 
 
 def new_case_id() -> str:

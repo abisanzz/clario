@@ -166,7 +166,6 @@ TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
 STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
 SAMPLE_CHECKLIST = "fintech_high"  # the checklist the sample pack's saved answer was made with (rated High)
-NOT_SURE_INDUSTRY = "Not sure: Clario will suggest one"  # the Industry field's first choice on Details & documents
 # The example's own details, used in the public demo whatever a review has saved: its recorded answers depend on them
 DEMO_FIXED_VALUES = {"company_link": SAMPLE_COMPANY_NUMBER, "website": "", "fca_frn": SAMPLE_FCA_FRN,
                      "country": UNITED_KINGDOM}
@@ -454,16 +453,6 @@ def details_tab() -> None:
             show_fca_firm(fca_frn, company_link)
         else:
             fca_frn = ""
-        known_industry = remembered("stated_industry", "", source)
-        # "Not sure" is a choice of its own (""), so a chosen industry can always be set back to it
-        industry_choices = ["", *INDUSTRIES]
-        stated_industry = st.selectbox(
-            "Industry", industry_choices, format_func=lambda key: INDUSTRIES.get(key, NOT_SURE_INDUSTRY),
-            index=industry_choices.index(known_industry) if known_industry in INDUSTRIES else 0,
-            key=f"stated_industry_choice_{source}",
-            help="If you know it. Clario still suggests an industry from the documents, and you confirm it at Risk "
-                 "assessment.",
-        ) or ""
         existing = find_case({"entity_name": entity_name, "company_link": company_link})
         if existing and existing["id"] != st.session_state.get("case_id"):
             with st.container(border=True):
@@ -531,7 +520,7 @@ def details_tab() -> None:
 
     details = {"source": source, "entity_name": entity_name, "company_link": company_link, "website": website,
                "fca_frn": fca_frn, "country": country, "registration_number": registration_number,
-               "stated_industry": stated_industry, "owner": owner.strip()}
+               "owner": owner.strip()}
     with st.container(horizontal=True):
         if st.button("Save as draft", icon=":material/save:", disabled=not owner.strip()):
             save_draft(details, documents)
@@ -1247,8 +1236,8 @@ if screen == "assess":
                     st.stop()
         risk = st.session_state.risk[1]
         decision = load_risk_decision(decision_path)
-        stated_industry = saved.get("stated_industry", "")
-        chosen_industry = st.session_state.get("choice", (stated_industry or suggestion.industry, None))[0]
+        # The industry is chosen here only: Clario's suggestion, until the analyst overrides it
+        chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
         if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
             chosen_industry = suggestion.industry
         # The public demo offers only the industries the example case has recorded answers for
@@ -1272,9 +1261,6 @@ if screen == "assess":
                 st.markdown(f"#### {suggestion.industry_label}")
                 if suggestion.sources_agree == "no":
                     st.badge("Sources disagree", icon=":material/warning:", color="orange")
-                if stated_industry in INDUSTRIES and stated_industry != suggestion.industry:
-                    st.caption(f":material/info: You entered **{INDUSTRIES[stated_industry]}** on Details & "
-                               "documents. Check which is right.")
                 industry = INDUSTRY_KEY[st.selectbox(
                     "Override Industry", [INDUSTRIES[option] for option in industry_options],
                     index=industry_options.index(chosen_industry), key=f"industry_{hash(links_key)}",
