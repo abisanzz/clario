@@ -1,0 +1,443 @@
+{
+  "input_sha256": "376864a28c9a287866065a54e889a363ca00a70c2adef7499545cc46b84df49c",
+  "model": "claude-opus-5-5",
+  "answer": {
+    "checks": [
+      {
+        "check_id": "1.1",
+        "status": "Unclear",
+        "finding": "The certificate gives the name EXAMPLE PAYMENTS LTD, company number 99999901 and an incorporation date of 14 March 2019. The articles, registers and resolution repeat the same name and number. However, the Companies House check found no company with this number, so legal existence is not confirmed. The document is also marked as a specimen.",
+        "evidence": [
+          {
+            "source_number": 1,
+            "page": 1,
+            "quote": "Company Number 99999901"
+          },
+          {
+            "source_number": 1,
+            "page": 1,
+            "quote": "EXAMPLE PAYMENTS LTD"
+          },
+          {
+            "source_number": 1,
+            "page": 1,
+            "quote": "Given at Companies House, Cardiff, on 14th March 2019"
+          },
+          {
+            "source_number": 9,
+            "page": 1,
+            "quote": "There is no company with number 99999901 on the Companies House register."
+          }
+        ]
+      },
+      {
+        "check_id": "1.2",
+        "status": "Unclear",
+        "finding": "The proof of address is an electricity bill dated 2 September 2026. It is addressed to the company at 1 Example Street, London EX1 1AA, which it calls the supply address. The client says it trades from its registered office, so no separate principal place of business is given. Nothing confirms that 1 Example Street is the registered office: the certificate only says the office is in England and Wales, and Companies House has no record of the company.",
+        "evidence": [
+          {
+            "source_number": 4,
+            "page": 1,
+            "quote": "Account holder and supply address"
+          },
+          {
+            "source_number": 4,
+            "page": 1,
+            "quote": "1 Example Street, London EX1 1AA"
+          },
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q7. Does the firm trade from its registered office? Yes."
+          },
+          {
+            "source_number": 9,
+            "page": 1,
+            "quote": "There is no company with number 99999901 on the Companies House register."
+          }
+        ]
+      },
+      {
+        "check_id": "1.3",
+        "status": "Unclear",
+        "finding": "Active status, filed accounts and the confirmation statement cannot be confirmed. The Companies House search returned no company with this number.",
+        "evidence": [
+          {
+            "source_number": 9,
+            "page": 1,
+            "quote": "There is no company with number 99999901 on the Companies House register."
+          }
+        ]
+      },
+      {
+        "check_id": "1.4",
+        "status": "Present",
+        "finding": "The articles adopt the model articles. The directors manage the business and may exercise all the company's powers. A document is validly executed if signed by two directors, or by one director with an attesting witness.",
+        "evidence": [
+          {
+            "source_number": 2,
+            "page": 1,
+            "quote": "Subject to these articles, the directors are responsible for the management of the company's business, for which purpose they may exercise all the powers of the company."
+          },
+          {
+            "source_number": 2,
+            "page": 2,
+            "quote": "A document is validly executed by the company if it is signed by any two directors, or by one director in the presence of a witness who attests the signature."
+          }
+        ]
+      },
+      {
+        "check_id": "2.1",
+        "status": "Unclear",
+        "finding": "The client says it is an Authorised Payment Institution with FCA firm reference number 999999. The FCA register has no firm with that number. No consumer credit permissions are claimed, and the firm presents itself as a payments business rather than a lender.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q1. Is the firm regulated? Yes. Authorised Payment Institution, FCA firm reference number 999999 (specimen)."
+          },
+          {
+            "source_number": 10,
+            "page": 1,
+            "quote": "There is no firm with reference number 999999 on the FCA Financial Services Register."
+          }
+        ]
+      },
+      {
+        "check_id": "2.2",
+        "status": "Needs human review",
+        "finding": "Permissions cannot be checked because there is no FCA register entry. The firm describes a payments app, not credit products. An analyst should decide whether the lending checks apply and what payment services permissions are needed.",
+        "evidence": [
+          {
+            "source_number": 10,
+            "page": 1,
+            "quote": "There is no firm with reference number 999999 on the FCA Financial Services Register."
+          },
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q4. Business model: a payments app that lets small UK and Irish businesses collect card and open-banking payments."
+          }
+        ]
+      },
+      {
+        "check_id": "2.3",
+        "status": "Missing",
+        "finding": "Nothing on the FCA register confirms whether the firm is directly authorised or an agent of another firm. The register has no entry for the stated reference number.",
+        "evidence": [
+          {
+            "source_number": 10,
+            "page": 1,
+            "quote": "There is no firm with reference number 999999 on the FCA Financial Services Register."
+          }
+        ]
+      },
+      {
+        "check_id": "2.4",
+        "status": "Missing",
+        "finding": "No FCA restrictions, warnings or enforcement information can be checked, because there is no register entry.",
+        "evidence": [
+          {
+            "source_number": 10,
+            "page": 1,
+            "quote": "There is no firm with reference number 999999 on the FCA Financial Services Register."
+          }
+        ]
+      },
+      {
+        "check_id": "2.5",
+        "status": "Needs human review",
+        "finding": "Nothing covers affordability, creditworthiness or the treatment of vulnerable customers. The firm does not appear to lend, so an analyst should confirm whether this check applies.",
+        "evidence": []
+      },
+      {
+        "check_id": "3.1",
+        "status": "Unclear",
+        "finding": "Alex Sample (60%) and Jamie Example (25%) hold shares directly. Example Ventures Fund I LP (15%) is shown care of a Jersey manager, but its general partner, investors and controllers are not identified. No ownership chart was provided.",
+        "evidence": [
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "Example Ventures Fund I LP"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "c/o Example Ventures Manager Ltd, Jersey"
+          }
+        ]
+      },
+      {
+        "check_id": "3.2",
+        "status": "Unclear",
+        "finding": "The sources disagree on Jamie Example's holding. The questionnaire says 28%, but the register of members shows 250,000 shares, or 25%, which is not more than 25%. Alex Sample at 60% is clearly a beneficial owner.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Alex Sample (60%) and Jamie Example (28%)."
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "250,000 25%"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "600,000 60%"
+          }
+        ]
+      },
+      {
+        "check_id": "3.4",
+        "status": "Unclear",
+        "finding": "No ownership chart was provided, and Companies House has no record of the company, so there is no PSC register to compare. The questionnaire (28%) and the register of members (25%) disagree on Jamie Example's holding. This mismatch should be reviewed.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Alex Sample (60%) and Jamie Example (28%)."
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "250,000 25%"
+          },
+          {
+            "source_number": 9,
+            "page": 1,
+            "quote": "There is no company with number 99999901 on the Companies House register."
+          }
+        ]
+      },
+      {
+        "check_id": "3.5",
+        "status": "Unclear",
+        "finding": "A fund shareholder is named, with a manager in Jersey. The fund's own jurisdiction, its general partner and the people behind it are not stated.",
+        "evidence": [
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "c/o Example Ventures Manager Ltd, Jersey"
+          }
+        ]
+      },
+      {
+        "check_id": "4.1",
+        "status": "Present",
+        "finding": "The register of directors, as at 1 September 2026, lists three directors: Alex Sample, Jamie Example and Sam Placeholder. The board resolution is signed by the same three.",
+        "evidence": [
+          {
+            "source_number": 7,
+            "page": 1,
+            "quote": "Position as at 1 September 2026."
+          },
+          {
+            "source_number": 3,
+            "page": 1,
+            "quote": "Sam Placeholder (signed)"
+          }
+        ]
+      },
+      {
+        "check_id": "4.2",
+        "status": "Needs human review",
+        "finding": "Alex Sample and Jamie Example (the beneficial owners and authorised signatories) are verified. Sam Placeholder, a director who completed the questionnaire, was not submitted for verification. An analyst should decide whether Sam needs to be verified.",
+        "evidence": [
+          {
+            "source_number": 5,
+            "page": 1,
+            "quote": "No other individuals were submitted for verification."
+          },
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Completed by Sam Placeholder, Chief Risk Officer and MLRO, on 1 September 2026."
+          }
+        ]
+      },
+      {
+        "check_id": "4.3",
+        "status": "Present",
+        "finding": "Names and dates of birth for Alex Sample and Jamie Example match across the ID report and the register of directors. Their residential addresses match between the ID report and the register of members. Sam Placeholder's residential address is not provided.",
+        "evidence": [
+          {
+            "source_number": 5,
+            "page": 1,
+            "quote": "Alex Sample 12 April 1985"
+          },
+          {
+            "source_number": 7,
+            "page": 1,
+            "quote": "Alex Sample 12 April 1985"
+          },
+          {
+            "source_number": 8,
+            "page": 1,
+            "quote": "10 Sample Lane, London EX2 2BB"
+          },
+          {
+            "source_number": 5,
+            "page": 1,
+            "quote": "Jamie Example 3 November 1988"
+          }
+        ]
+      },
+      {
+        "check_id": "4.4",
+        "status": "Needs human review",
+        "finding": "The board resolution, signed by all three directors, authorises any two of Alex Sample and Jamie Example to instruct and sign on the accounts. Sam Placeholder completed the onboarding questionnaire but is not named as authorised in the resolution. An analyst should confirm who is instructing the bank.",
+        "evidence": [
+          {
+            "source_number": 3,
+            "page": 1,
+            "quote": "IT IS RESOLVED that the company opens accounts with the onboarding bank, and that any two of Alex Sample and Jamie Example are authorised to give instructions and sign on those accounts."
+          }
+        ]
+      },
+      {
+        "check_id": "5.1",
+        "status": "Present",
+        "finding": "The questionnaire describes the business model, the customer type and the countries served.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q4. Business model: a payments app that lets small UK and Irish businesses collect card and open-banking payments. Customers are small and medium-sized businesses in the UK and Ireland."
+          }
+        ]
+      },
+      {
+        "check_id": "5.2",
+        "status": "Present",
+        "finding": "The questionnaire gives the purpose of the accounts and the expected volumes and values.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q5. Purpose of the account: operational account for fee income and supplier payments, plus a safeguarding account. Expected volume: about 400 payments a month, around GBP 1.2 million a month."
+          }
+        ]
+      },
+      {
+        "check_id": "5.3",
+        "status": "Present",
+        "finding": "Source of funds is stated as a seed funding round and fee revenue. No supporting evidence for the funding round was provided.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 1,
+            "quote": "Q6. Source of funds: a seed funding round of GBP 2 million led by Example Ventures Fund I LP in 2024, and transaction fee revenue."
+          }
+        ]
+      },
+      {
+        "check_id": "5.4",
+        "status": "Present",
+        "finding": "The questionnaire names the MLRO, lists the AML policies and gives the date of the last independent audit.",
+        "evidence": [
+          {
+            "source_number": 6,
+            "page": 2,
+            "quote": "Q8. MLRO: Sam Placeholder."
+          },
+          {
+            "source_number": 6,
+            "page": 2,
+            "quote": "Q9. Policies: AML and counter-terrorist financing policy, sanctions policy and customer due diligence procedure, all approved by the board in January 2026."
+          },
+          {
+            "source_number": 6,
+            "page": 2,
+            "quote": "Q10. Last independent AML audit: March 2026, by a specimen audit firm. No high-risk findings."
+          }
+        ]
+      },
+      {
+        "check_id": "5.5",
+        "status": "Needs human review",
+        "finding": "No information on lending capital was provided. The firm describes itself as a payments business, not a lender, so an analyst should confirm whether this check applies.",
+        "evidence": []
+      },
+      {
+        "check_id": "5.6",
+        "status": "Needs human review",
+        "finding": "No loan book information or accounts were provided. An analyst should confirm whether this check applies to a payments firm.",
+        "evidence": []
+      },
+      {
+        "check_id": "5.7",
+        "status": "Needs human review",
+        "finding": "No information on how borrowers repay was provided. The firm does not appear to lend, so an analyst should confirm whether this check applies.",
+        "evidence": []
+      },
+      {
+        "check_id": "5.8",
+        "status": "Needs human review",
+        "finding": "No information on collections or debt sale was provided. An analyst should confirm whether this check applies.",
+        "evidence": []
+      },
+      {
+        "check_id": "5.9",
+        "status": "Needs human review",
+        "finding": "No information on borrower fraud controls was provided. An analyst should confirm whether this check applies.",
+        "evidence": []
+      }
+    ],
+    "facts": {
+      "certificate_company_name": {
+        "value": "EXAMPLE PAYMENTS LTD",
+        "source_number": 1,
+        "page": 1
+      },
+      "certificate_company_number": {
+        "value": "99999901",
+        "source_number": 1,
+        "page": 1
+      },
+      "certificate_incorporation_date": {
+        "value": "14th March 2019",
+        "source_number": 1,
+        "page": 1,
+        "iso_date": "2019-03-14"
+      },
+      "proof_of_address_company_name": {
+        "value": "EXAMPLE PAYMENTS LTD",
+        "source_number": 4,
+        "page": 1
+      },
+      "proof_of_address_registered_office": {
+        "value": "1 Example Street, London EX1 1AA",
+        "source_number": 4,
+        "page": 1
+      },
+      "proof_of_address_date": {
+        "value": "2 September 2026",
+        "source_number": 4,
+        "page": 1,
+        "iso_date": "2026-09-02"
+      },
+      "trades_from_registered_office": {
+        "value": "yes",
+        "source_number": 6,
+        "page": 1
+      },
+      "principal_place_of_business": {
+        "value": "",
+        "source_number": 0,
+        "page": 0
+      },
+      "articles_company_name": {
+        "value": "EXAMPLE PAYMENTS LTD",
+        "source_number": 2,
+        "page": 1
+      },
+      "articles_authority_summary": {
+        "value": "The directors manage the company's business and may exercise all its powers. A document is validly executed if signed by any two directors, or by one director in the presence of an attesting witness.",
+        "source_number": 2,
+        "page": 2
+      }
+    }
+  }
+}

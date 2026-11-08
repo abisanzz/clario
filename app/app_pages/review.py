@@ -166,6 +166,21 @@ TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
 STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
 SAMPLE_CHECKLIST = "fintech_high"  # the checklist the sample pack's saved answer was made with (rated High)
+# Shown in the public demo beside what is fixed there, because the example's answers were recorded with it
+DEMO_FIXED = ("Fixed in the public demo: Clario's answers for the example case were recorded with these details. Run "
+              "Clario on your own computer to try others.")
+
+
+def sample_assessment_answer(checklist: str) -> Path | None:
+    """The example case's recorded checklist answer for this checklist, if one was recorded."""
+    name = "pack_assessment.answer.json" if checklist == SAMPLE_CHECKLIST else f"pack_assessment_{checklist}.answer.json"
+    return SAMPLES / name if (SAMPLES / name).exists() else None
+
+
+def demo_industries() -> list[str]:
+    """The industries the example case has recorded checklist answers for at every risk level."""
+    return [industry for industry in INDUSTRIES
+            if all(sample_assessment_answer(checklist_for(industry, rating)[0]) for rating in RATINGS)]
 
 
 @st.cache_data(ttl=3600, max_entries=50, show_spinner="Checking Companies House, the FCA register and the website...")
@@ -394,19 +409,19 @@ def details_tab() -> None:
         country = st.selectbox(
             "Country of incorporation", COUNTRIES if known_country in COUNTRIES else [known_country] + COUNTRIES,
             index=(COUNTRIES.index(known_country) if known_country in COUNTRIES else 0), key=f"country_{source}",
-            accept_new_options=True,
-            help="Where the entity is registered. Choose from the list or type another country. Companies House and "
-                 "FCA register checks apply to UK companies only.",
+            accept_new_options=True, disabled=is_demo(),
+            help=DEMO_FIXED if is_demo() else "Where the entity is registered. Choose from the list or type another "
+                 "country. Companies House and FCA register checks apply to UK companies only.",
         ) or UNITED_KINGDOM
         registration_number = ""
         if is_uk(country):
             company_link = st.text_input(
                 "Companies House Link or Company Number",
                 value=remembered("company_link", SAMPLE_COMPANY_NUMBER, source),
-                key=f"company_link_{source}",
+                key=f"company_link_{source}", disabled=is_demo(),
                 placeholder="e.g. 12345678 or https://find-and-update.company-information.service.gov.uk/company/12345678",
-                help="Enter a link to the company’s Companies House record or its company registration number. "
-                     "We’ll use this to find the company’s details on Companies House.",
+                help=DEMO_FIXED if is_demo() else "Enter a link to the company’s Companies House record or its "
+                     "company registration number. We’ll use this to find the company’s details on Companies House.",
             )
             show_industry(company_link)
             show_entity_name_check(entity_name, company_link)
@@ -420,13 +435,14 @@ def details_tab() -> None:
             st.caption(f":material/info: Incorporated in {country}: Companies House and the FCA register are not "
                        "checked. Check the entity on its home country's register.")
         website = st.text_input("Company website", value=remembered("website", "", source), key=f"website_{source}",
-                                placeholder="e.g. example.com")
+                                placeholder="e.g. example.com", disabled=is_demo(),
+                                help=DEMO_FIXED if is_demo() else None)
         if is_uk(country):
             fca_frn = st.text_input(
                 "FCA firm reference number", key=f"fca_{source}", placeholder="e.g. 730427",
-                value=remembered("fca_frn", SAMPLE_FCA_FRN, source),
-                help="The 6 or 7 digit FRN on the firm's FCA register page. Leave empty if the firm is not FCA "
-                     "regulated.",
+                value=remembered("fca_frn", SAMPLE_FCA_FRN, source), disabled=is_demo(),
+                help=DEMO_FIXED if is_demo() else "The 6 or 7 digit FRN on the firm's FCA register page. Leave empty "
+                     "if the firm is not FCA regulated.",
             )
             show_fca_firm(fca_frn, company_link)
         else:
@@ -1090,7 +1106,8 @@ if screen == "documents":
                         type_side, comment_side = st.columns([2, 3])
                         chosen_type = type_side.selectbox(
                             "Document type", list(DOCUMENT_TYPES.values()),
-                            index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}")
+                            index=list(DOCUMENT_TYPES).index(label.document_type), key=f"type_{pack_key}_{number}",
+                            disabled=is_demo(), help=DEMO_FIXED if is_demo() else None)
                         type_changed = TYPE_KEY[chosen_type] != claude_types[label.name]
                         comment = comment_side.text_input(
                             "Comments (required: you changed the type)" if type_changed else "Comments",
@@ -1223,6 +1240,10 @@ if screen == "assess":
         chosen_industry = st.session_state.get("choice", (stated_industry or suggestion.industry, None))[0]
         if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
             chosen_industry = suggestion.industry
+        # The public demo offers only the industries the example case has recorded answers for
+        industry_options = (demo_industries() or [suggestion.industry]) if is_demo() else list(INDUSTRIES)
+        if chosen_industry not in industry_options:
+            chosen_industry = suggestion.industry if suggestion.industry in industry_options else industry_options[0]
 
         st.subheader(":material/fact_check: Industry, risk rating and checklist")
         st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Clario AI's "
@@ -1244,9 +1265,13 @@ if screen == "assess":
                     st.caption(f":material/info: You entered **{INDUSTRIES[stated_industry]}** on Details & "
                                "documents. Check which is right.")
                 industry = INDUSTRY_KEY[st.selectbox(
-                    "Override Industry", list(INDUSTRIES.values()), index=list(INDUSTRIES).index(chosen_industry),
-                    key=f"industry_{hash(links_key)}", help="Change this if the suggested industry is wrong.",
+                    "Override Industry", [INDUSTRIES[option] for option in industry_options],
+                    index=industry_options.index(chosen_industry), key=f"industry_{hash(links_key)}",
+                    help="Change this if the suggested industry is wrong.",
                 )]
+                if is_demo():
+                    st.caption(":material/science: In the public demo you can choose the industries Clario's answers "
+                               "for the example case were recorded for.")
                 with st.expander("Why this industry?"):
                     st.markdown(suggestion.reason)
                     if suggestion.sources_agree == "no":
@@ -1389,11 +1414,14 @@ with open_tab:  # Evidence review, or Ongoing monitoring: both work from the che
     # --- Screen 5: results. The checks run as this screen opens, then the results appear ---
 
     if "assessment" not in st.session_state:
-        replay_sample = source == "Sample pack" and checklist == SAMPLE_CHECKLIST
         if review_date:
             answer_path = assessment_answer_path(review_key, cycle)
-        else:
-            answer_path = saved_answers.get("assessment") if replay_sample or source != "Sample pack" else None
+        elif source != "Sample pack":
+            answer_path = saved_answers.get("assessment")
+        elif saved_answers is SAMPLE_ANSWERS:  # the example case replays the answer recorded for this checklist
+            answer_path = sample_assessment_answer(checklist)
+        else:  # the example case with added documents keeps its own answer, for the checklist it was recorded with
+            answer_path = saved_answers.get("assessment") if checklist == SAMPLE_CHECKLIST else None
         sources, _ = fetch_links(company_link, website, fca_frn)
         with st.spinner(f"Clario is checking the {len(documents)} documents against every item on the "
                         f"{CHECKLISTS[checklist][0]} checklist. This can take a minute..."):
