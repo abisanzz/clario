@@ -167,6 +167,9 @@ STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
 SAMPLE_CHECKLIST = "fintech_high"  # the checklist the sample pack's saved answer was made with (rated High)
 NOT_SURE_INDUSTRY = "Not sure: Clario will suggest one"  # the Industry field's first choice on Details & documents
+# The example's own details, used in the public demo whatever a review has saved: its recorded answers depend on them
+DEMO_FIXED_VALUES = {"company_link": SAMPLE_COMPANY_NUMBER, "website": "", "fca_frn": SAMPLE_FCA_FRN,
+                     "country": UNITED_KINGDOM}
 # Shown in the public demo beside what is fixed there, because the example's answers were recorded with it
 DEMO_FIXED = ("Fixed in the public demo: Clario's answers for the example case were recorded with these details. Run "
               "Clario on your own computer to try others.")
@@ -338,7 +341,10 @@ saved = st.session_state.get("entity", {})
 
 
 def remembered(field: str, sample_value: str, source: str) -> str:
-    """What to show in a field: what was entered before for this choice of documents, else the sample's value."""
+    """What to show in a field: what was entered before for this choice of documents, else the sample's value.
+    In the public demo the details the recorded answers depend on are always the example's own."""
+    if is_demo() and field in DEMO_FIXED_VALUES:
+        return DEMO_FIXED_VALUES[field]
     if saved.get("source") == source:
         return saved.get(field, "")
     return sample_value if source == "Sample pack" else ""
@@ -649,6 +655,8 @@ if not saved:  # a new assessment: only the details tab can be used until it is 
 
 source = saved["source"]
 entity_name, company_link, website, fca_frn = (saved[k] for k in ("entity_name", "company_link", "website", "fca_frn"))
+if is_demo():  # always the example's own details, even in a review saved before they were fixed in the demo
+    company_link, website, fca_frn = (DEMO_FIXED_VALUES[k] for k in ("company_link", "website", "fca_frn"))
 documents = (SAMPLE_DOCUMENTS if source == "Sample pack" else saved["documents"]) + saved.get("supporting", [])
 # The example case replays the answers that ship with it; once documents are added to it, its answers are saved in
 # the review's own folder instead, so the shipped ones are never overwritten
@@ -673,7 +681,7 @@ def navigation(next_label: str | None = None, next_ready: bool = True, save=None
 
 
 st.title(entity_name or "Legal entity")
-country = saved.get("country") or UNITED_KINGDOM
+country = DEMO_FIXED_VALUES["country"] if is_demo() else saved.get("country") or UNITED_KINGDOM
 summary = [("Incorporated in", country), ("Company", company_link),
            ("Registration number", saved.get("registration_number", "")), ("FCA FRN", fca_frn), ("Website", website),
            ("Documents", f"{len(documents)} files")]
