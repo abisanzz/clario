@@ -166,6 +166,7 @@ TYPE_KEY = {label: key for key, label in DOCUMENT_TYPES.items()}
 STATUS_FROM_TEXT = {text: status for status, text in STATUS_TEXT.items()}
 INDUSTRY_KEY = {label: key for key, label in INDUSTRIES.items()}
 SAMPLE_CHECKLIST = "fintech_high"  # the checklist the sample pack's saved answer was made with (rated High)
+NOT_SURE_INDUSTRY = "Not sure: Clario will suggest one"  # the Industry field's first choice on Details & documents
 # Shown in the public demo beside what is fixed there, because the example's answers were recorded with it
 DEMO_FIXED = ("Fixed in the public demo: Clario's answers for the example case were recorded with these details. Run "
               "Clario on your own computer to try others.")
@@ -448,10 +449,12 @@ def details_tab() -> None:
         else:
             fca_frn = ""
         known_industry = remembered("stated_industry", "", source)
+        # "Not sure" is a choice of its own (""), so a chosen industry can always be set back to it
+        industry_choices = ["", *INDUSTRIES]
         stated_industry = st.selectbox(
-            "Industry", list(INDUSTRIES), format_func=INDUSTRIES.get,
-            index=list(INDUSTRIES).index(known_industry) if known_industry in INDUSTRIES else None,
-            key=f"stated_industry_{source}", placeholder="Not sure: Clario will suggest one",
+            "Industry", industry_choices, format_func=lambda key: INDUSTRIES.get(key, NOT_SURE_INDUSTRY),
+            index=industry_choices.index(known_industry) if known_industry in INDUSTRIES else 0,
+            key=f"stated_industry_choice_{source}",
             help="If you know it. Clario still suggests an industry from the documents, and you confirm it at Risk "
                  "assessment.",
         ) or ""
