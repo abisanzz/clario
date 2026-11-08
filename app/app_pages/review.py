@@ -1322,8 +1322,6 @@ if screen == "assess":
         with checklist_slot:
             st.caption("Set by the industry and risk rating")
             st.markdown(f"#### {CHECKLISTS[checklist][0]}")
-            if not written_for_industry:
-                st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
             if demo_unavailable:
                 ready = demo_ready_industries(final)
                 st.info(f"**Not available in the public demo.** The {CHECKLISTS[checklist][0]} checklist exists, but "
@@ -1341,7 +1339,8 @@ if screen == "assess":
                             f"(**{final}**{rating_by}).  \n{LEVEL_MEANING[final]}")
                 st.caption(f"{checklist_size(checklist)} checks.")
                 if not written_for_industry:
-                    st.caption("There is no checklist written for this industry yet, so the fintech one is used.")
+                    st.caption(f"The {CHECKLISTS[checklist][0].split(' · ')[0]} checklist is used for "
+                               f"{INDUSTRIES[industry]}.")
 
         # --- Sign-off: only when the analyst overrides Clario's suggested rating ---
         reason, reviewer, evidence_link, evidence = "", "", "", None
