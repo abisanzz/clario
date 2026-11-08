@@ -96,7 +96,7 @@ Sign in as any of the demo team members, start a new assessment and choose **Exa
 .venv/bin/python -m pytest
 ```
 
-To host a public demo like the one above, set `CLARIO_DEMO = "true"` (for example as a secret on Streamlit Community Cloud) and give it only the Companies House and FCA keys. In demo mode new assessments use the example case, uploads are switched off, and Clario never connects to the AI service, even if a key is set. The details its saved answers depend on (company number, country, FCA number, website and document types) are fixed, while the risk rating can be overridden and the industry changed between Payments, E-money and Lending, because the example's checklist answers are saved for each of those checklists at every risk level.
+To host a public demo like the one above, set `CLARIO_DEMO = "true"` (for example as a secret on Streamlit Community Cloud) and give it only the Companies House and FCA keys. In demo mode new assessments use the example case, uploads are switched off, and Clario never connects to the AI service, even if a key is set. The details its saved answers depend on (company number, country, FCA number, website and document types) are fixed, while the risk rating can be overridden and the industry changed between Payments, E-money and Lending, because the example's checklist answers are saved for each of those checklists at every risk level. Choosing an industry whose checklist has no saved answer shows a note that it isn't available in the demo.
 
 ## Project layout
 

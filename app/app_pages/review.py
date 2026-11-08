@@ -180,10 +180,10 @@ def sample_assessment_answer(checklist: str) -> Path | None:
     return SAMPLES / name if (SAMPLES / name).exists() else None
 
 
-def demo_industries() -> list[str]:
-    """The industries the example case has recorded checklist answers for at every risk level."""
-    return [industry for industry in INDUSTRIES
-            if all(sample_assessment_answer(checklist_for(industry, rating)[0]) for rating in RATINGS)]
+def demo_ready_industries(rating: str) -> list[str]:
+    """The industries with a checklist of their own that the example case has a recorded answer for at this rating."""
+    return [label for industry, label in INDUSTRIES.items()
+            if checklist_for(industry, rating)[1] and sample_assessment_answer(checklist_for(industry, rating)[0])]
 
 
 @st.cache_data(ttl=3600, max_entries=50, show_spinner="Checking Companies House, the FCA register and the website...")
@@ -1240,10 +1240,7 @@ if screen == "assess":
         chosen_industry = st.session_state.get("choice", (suggestion.industry, None))[0]
         if chosen_industry not in INDUSTRIES:  # e.g. "Not enough information" in a review saved before it was removed
             chosen_industry = suggestion.industry
-        # The public demo offers only the industries the example case has recorded answers for
-        industry_options = (demo_industries() or [suggestion.industry]) if is_demo() else list(INDUSTRIES)
-        if chosen_industry not in industry_options:
-            chosen_industry = suggestion.industry if suggestion.industry in industry_options else industry_options[0]
+        industry_options = list(INDUSTRIES)
 
         st.subheader(":material/fact_check: Industry, risk rating and checklist")
         st.caption("Clario's suggestions are below. Change any of them if you disagree, and open **Why** to see Clario AI's "
@@ -1269,9 +1266,6 @@ if screen == "assess":
                 industry_changed = industry != suggestion.industry
                 if industry_changed:
                     st.badge("Selected by the analyst", icon=":material/person:", color="blue")
-                if is_demo():
-                    st.caption(":material/science: In the public demo you can choose the industries Clario's answers "
-                               "for the example case were recorded for.")
                 with st.expander("Why this industry?"):
                     if industry_changed:
                         st.info(f"**Selected by the analyst: {INDUSTRIES[industry]}.** Clario suggested "
@@ -1323,11 +1317,24 @@ if screen == "assess":
 
         # The checklist follows the industry and the risk rating; it cannot be changed on its own
         checklist, written_for_industry = checklist_for(industry, final)
+        # The public demo can only use checklists the example case has a recorded answer for
+        demo_unavailable = is_demo() and sample_assessment_answer(checklist) is None
         with checklist_slot:
             st.caption("Set by the industry and risk rating")
             st.markdown(f"#### {CHECKLISTS[checklist][0]}")
             if not written_for_industry:
                 st.badge("No checklist for this industry yet", icon=":material/info:", color="gray")
+                if is_demo():
+                    st.caption(f":material/info: Not a demo limitation: Clario has no checklist written for "
+                               f"{INDUSTRIES[industry]} yet, so it uses the fintech one.")
+            if demo_unavailable:
+                ready = demo_ready_industries(final)
+                st.info(f"**Not available in the public demo.** The {CHECKLISTS[checklist][0]} checklist exists, but "
+                        "Clario's answers for the example case were not recorded with it, and the demo never asks "
+                        "Clario AI for new ones. "
+                        + (f"Choose {', '.join(ready[:-1])} or {ready[-1]} to continue, or run" if len(ready) > 1
+                           else "Run")
+                        + " Clario on your own computer to use it.", icon=":material/science:")
             with st.expander("Why this checklist?"):
                 industry_by = (f", selected by the analyst; Clario suggested {suggestion.industry_label}"
                                if industry_changed else ", as Clario suggested")
@@ -1375,7 +1382,9 @@ if screen == "assess":
         with st.container(horizontal=True):
             if st.button("Back", icon=":material/arrow_back:", key="back_assess"):
                 go("documents")
-            if st.button("Next", type="primary", icon=":material/arrow_forward:", key="next_assess"):
+            if st.button("Next", type="primary", icon=":material/arrow_forward:", key="next_assess",
+                         disabled=demo_unavailable,
+                         help="This checklist is not available in the public demo." if demo_unavailable else None):
                 try:
                     saved_decision = save_risk_decision(decision_path, final, risk.overall, reason, reviewer,
                                                         evidence_link=evidence_link, evidence=evidence)
