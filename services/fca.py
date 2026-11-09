@@ -10,6 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from services.demo import is_demo
+
 API_BASE = "https://register.fca.org.uk/services/V0.1"
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 TIMEOUT_SECONDS = 20
@@ -28,7 +30,12 @@ class FcaLookupFailed(Exception):
 
 
 def _get(url: str) -> dict:
-    """Fetch one FCA register API address and return the JSON reply."""
+    """Fetch one FCA register API address and return the JSON reply.
+
+    In the public demo nothing is fetched: the example's firm reference number is fictional, so the reply is always
+    empty (no firm), and an outage can't change what Clario reads (its saved answers were recorded with this)."""
+    if is_demo():
+        return {}
     load_dotenv(ENV_PATH)
     email, key = os.getenv("FCA_API_EMAIL", "").strip(), os.getenv("FCA_API_KEY", "").strip()
     if not email or not key:

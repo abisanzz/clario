@@ -12,6 +12,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from services.demo import is_demo
+
 API_BASE = "https://api.company-information.service.gov.uk"
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 # Official SIC code meanings, from Companies House's public list (github.com/companieshouse/api-enumerations)
@@ -28,7 +30,12 @@ class LookupFailed(Exception):
 
 
 def _get(path: str, not_found: str) -> dict:
-    """Fetch one Companies House API path and return the JSON reply."""
+    """Fetch one Companies House API path and return the JSON reply.
+
+    In the public demo nothing is fetched: the example's company number is fictional, so the answer is always "not
+    on the register", and an outage can't change what Clario reads (its saved answers were recorded with this)."""
+    if is_demo():
+        raise CompanyNotFound(not_found)
     load_dotenv(ENV_PATH)
     key = os.getenv("COMPANIES_HOUSE_API_KEY", "").strip()
     if not key:

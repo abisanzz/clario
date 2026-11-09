@@ -103,3 +103,26 @@ def test_spaces_nobody_has_used_for_a_day_are_cleared(tmp_path):
         os.utime(path, (two_days_ago, two_days_ago))
     assert clear_old_visitors([tmp_path]) == ["a" * 16]
     assert not old.exists() and recent.exists() and (tmp_path / "visitors" / "not-a-visitor").exists()
+
+
+def test_the_demo_never_looks_up_the_registers(monkeypatch):
+    """The example's numbers are fictional: in the demo both registers answer "not found" without going online,
+    so an outage can't change what Clario reads."""
+    import urllib.request
+
+    from services.companies_house import CompanyNotFound, get_company
+    from services.fca import FirmNotFound, get_firm
+    from services.pack import companies_house_source, fca_source
+
+    def no_internet(*args, **kwargs):
+        raise AssertionError("the demo went online")
+    monkeypatch.setattr(urllib.request, "urlopen", no_internet)
+    monkeypatch.setenv("CLARIO_DEMO", "true")
+    with pytest.raises(CompanyNotFound):
+        get_company("99999901")
+    with pytest.raises(FirmNotFound):
+        get_firm("999999")
+    assert companies_house_source("99999901").text == (
+        "There is no company with number 99999901 on the Companies House register.")
+    assert fca_source("999999").text == (
+        "There is no firm with reference number 999999 on the FCA Financial Services Register.")
